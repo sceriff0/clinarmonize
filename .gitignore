@@ -8,3 +8,11 @@ results/
 test_data/
 __pycache__/
 *.pyc
+
+# nf-core template
+data/
+.DS_Store
+testing/
+testing*
+null/
+.lineage/
