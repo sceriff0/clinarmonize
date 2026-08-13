@@ -1,0 +1,10 @@
+.nextflow/
+.nextflow.log*
+work/
+results/
+.superpowers/
+.nf-test/
+.nf-test.log
+test_data/
+__pycache__/
+*.pyc

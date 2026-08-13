@@ -1,0 +1,2704 @@
+<meta name="schematic-format" content="2">
+<title>p-harmonize — Clinical Data Harmonization to OMOP · Schematic</title>
+<style>
+/* ── Tokens: complete light palette on bare :root ─────────────────────────── */
+:root {
+  --paper:      #F6F8FB;
+  --surface:    #FFFFFF;
+  --surface-2:  #EDF1F7;
+  --ink:        #12161D;
+  --ink-2:      #454E5C;
+  --ink-3:      #6B7482;
+  --rule:       #D9E0EA;
+  --rule-soft:  #E8EDF3;
+  --indigo:     #2E3A8C;
+  --indigo-bg:  #E7EAF8;
+  --teal:       #0F6B62;
+  --teal-bg:    #DFF0EC;
+  --ember:      #A63D22;
+  --ember-bg:   #FAE6DF;
+  --code-bg:    #EEF2F7;
+
+  --f-mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+  --f-text: "Iowan Old Style", "Charter", "Source Serif 4", "Palatino Linotype", Palatino, Georgia, serif;
+  --f-ui:   ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+
+  --col: 74ch;
+  --col-w: 94ch;   /* structured content: ladders, contracts, tables */
+  --s1: 4px; --s2: 8px; --s3: 14px; --s4: 22px; --s5: 34px; --s6: 54px; --s7: 84px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:     #0E1116;
+    --surface:   #151A21;
+    --surface-2: #1B212A;
+    --ink:       #E4E8EF;
+    --ink-2:     #AEB7C4;
+    --ink-3:     #7F8896;
+    --rule:      #262E39;
+    --rule-soft: #1E252E;
+    --indigo:    #9AA8F2;
+    --indigo-bg: #1C2140;
+    --teal:      #56C4B2;
+    --teal-bg:   #10302D;
+    --ember:     #E4906B;
+    --ember-bg:  #33190F;
+    --code-bg:   #171D25;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:     #0E1116;
+  --surface:   #151A21;
+  --surface-2: #1B212A;
+  --ink:       #E4E8EF;
+  --ink-2:     #AEB7C4;
+  --ink-3:     #7F8896;
+  --rule:      #262E39;
+  --rule-soft: #1E252E;
+  --indigo:    #9AA8F2;
+  --indigo-bg: #1C2140;
+  --teal:      #56C4B2;
+  --teal-bg:   #10302D;
+  --ember:     #E4906B;
+  --ember-bg:  #33190F;
+  --code-bg:   #171D25;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-text);
+  font-size: 17px;
+  line-height: 1.62;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; border-radius: 2px; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ── Shell ────────────────────────────────────────────────────────────────── */
+.shell { max-width: 1400px; margin: 0 auto; padding: 0 var(--s4); }
+.grid  { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: var(--s7); align-items: start; }
+@media (max-width: 1020px) { .grid { grid-template-columns: minmax(0,1fr); gap: var(--s4); } .rail { position: static; } }
+
+/* ── Masthead ─────────────────────────────────────────────────────────────── */
+.mast { border-bottom: 1px solid var(--rule); padding: var(--s6) 0 var(--s5); margin-bottom: var(--s6); }
+.eyebrow {
+  font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--ink-3); display: flex; flex-wrap: wrap; gap: var(--s3); margin-bottom: var(--s4);
+}
+.eyebrow b { color: var(--indigo); font-weight: 600; }
+h1 {
+  font-family: var(--f-mono); font-weight: 600; font-size: clamp(27px, 4vw, 42px);
+  line-height: 1.14; letter-spacing: -.022em; margin: 0 0 var(--s3); text-wrap: balance; max-width: 22ch;
+}
+.dek { font-size: 19px; color: var(--ink-2); max-width: 68ch; margin: 0; }
+.dek em { color: var(--ink); font-style: normal; box-shadow: inset 0 -0.42em 0 var(--indigo-bg); }
+
+/* ── Rail ─────────────────────────────────────────────────────────────────── */
+.rail { position: sticky; top: var(--s4); font-family: var(--f-mono); font-size: 12.5px; line-height: 1.5; padding-top: 4px; }
+.rail-h { text-transform: uppercase; letter-spacing: .12em; font-size: 10.5px; color: var(--ink-3); margin-bottom: var(--s3); }
+.rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.rail a { color: var(--ink-2); text-decoration: none; display: grid; grid-template-columns: 2.6em 1fr; gap: 2px; padding: 3px 6px; border-radius: 3px; border-left: 2px solid transparent; }
+.rail a:hover { color: var(--ink); background: var(--surface-2); border-left-color: var(--indigo); }
+.rail .n { color: var(--ink-3); }
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+main { padding-bottom: var(--s7); }
+section { margin-bottom: var(--s7); scroll-margin-top: var(--s4); }
+h2 {
+  font-family: var(--f-mono); font-size: 21px; font-weight: 600; letter-spacing: -.01em;
+  margin: 0 0 var(--s2); padding-bottom: var(--s3); border-bottom: 2px solid var(--ink);
+  display: grid; grid-template-columns: 2.9em 1fr; gap: var(--s2); align-items: baseline; max-width: var(--col);
+}
+h2 .n { color: var(--indigo); font-size: 15px; }
+h3 {
+  font-family: var(--f-mono); font-size: 14.5px; font-weight: 600; letter-spacing: .01em;
+  margin: var(--s5) 0 var(--s2); color: var(--ink);
+  display: grid; grid-template-columns: 3.6em 1fr; gap: var(--s2); align-items: baseline;
+}
+h3 .n { color: var(--ink-3); font-weight: 400; }
+h4 { font-family: var(--f-ui); font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); margin: var(--s4) 0 var(--s2); font-weight: 600; }
+p, ul, ol { max-width: var(--col); }
+p { margin: 0 0 var(--s3); }
+ul, ol { margin: 0 0 var(--s3); padding-left: 1.3em; }
+li { margin-bottom: 5px; }
+li::marker { color: var(--ink-3); }
+strong { font-weight: 600; }
+a { color: var(--indigo); text-underline-offset: 2px; }
+
+.lead { font-size: 18.5px; color: var(--ink-2); max-width: 70ch; margin-bottom: var(--s4); }
+
+/* ── Code ─────────────────────────────────────────────────────────────────── */
+code { font-family: var(--f-mono); font-size: .87em; background: var(--code-bg); padding: 1.5px 5px; border-radius: 3px; }
+pre {
+  font-family: var(--f-mono); font-size: 12.6px; line-height: 1.62; background: var(--surface);
+  border: 1px solid var(--rule); border-left: 3px solid var(--indigo); border-radius: 4px;
+  padding: var(--s3) var(--s4); overflow-x: auto; margin: 0 0 var(--s4);
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+pre .c { color: var(--ink-3); }
+pre .k { color: var(--indigo); font-weight: 600; }
+pre .s { color: var(--teal); }
+pre .bad { color: var(--ember); font-weight: 600; }
+.code-cap { font-family: var(--f-ui); font-size: 12px; color: var(--ink-3); margin: 0 0 var(--s2); letter-spacing: .02em; }
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+.tw { overflow-x: auto; margin: 0 0 var(--s4); border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-family: var(--f-ui); font-size: 13px; line-height: 1.5; }
+th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+thead th {
+  font-family: var(--f-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--ink-3); background: var(--surface-2); border-bottom: 1px solid var(--rule); white-space: nowrap; font-weight: 600;
+}
+tbody tr:last-child td { border-bottom: none; }
+td code { font-size: 12px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ── Chips: the three leakage classes ─────────────────────────────────────── */
+.chip {
+  display: inline-block; font-family: var(--f-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: .07em; text-transform: uppercase; padding: 2.5px 7px; border-radius: 3px; white-space: nowrap;
+}
+.chip.safe   { background: var(--teal-bg);   color: var(--teal);   border: 1px solid var(--teal); }
+.chip.frozen { background: var(--indigo-bg); color: var(--indigo); border: 1px solid var(--indigo); }
+.chip.stop   { background: var(--ember-bg);  color: var(--ember);  border: 1px solid var(--ember); }
+
+/* ── Callouts ─────────────────────────────────────────────────────────────── */
+.note { border: 1px solid var(--rule); border-left: 3px solid var(--ink-3); background: var(--surface); padding: var(--s3) var(--s4); border-radius: 4px; margin: 0 0 var(--s4); max-width: var(--col); }
+.note.stop { border-left-color: var(--ember); background: var(--ember-bg); }
+.note.safe { border-left-color: var(--teal); background: var(--teal-bg); }
+.note.frozen { border-left-color: var(--indigo); background: var(--indigo-bg); }
+.note > :last-child { margin-bottom: 0; }
+.note .lbl { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; display: block; margin-bottom: 5px; color: var(--ink-2); }
+.note.stop .lbl { color: var(--ember); }
+.note.safe .lbl { color: var(--teal); }
+.note.frozen .lbl { color: var(--indigo); }
+
+/* ── Invariant plaque ─────────────────────────────────────────────────────── */
+.plaque {
+  border: 2px solid var(--ink); border-radius: 5px; background: var(--surface);
+  padding: var(--s4) var(--s5); margin: 0 0 var(--s4); max-width: var(--col);
+}
+.plaque .eq { font-family: var(--f-mono); font-size: clamp(15px, 2.4vw, 21px); font-weight: 600; letter-spacing: -.01em; margin: 0 0 var(--s2); overflow-x: auto; }
+.plaque .gloss { font-size: 15.5px; color: var(--ink-2); margin: 0; }
+
+/* ── Figures ──────────────────────────────────────────────────────────────── */
+figure { margin: 0 0 var(--s5); }
+figure svg { max-width: 100%; height: auto; display: block; color: var(--ink); }
+figcaption { font-family: var(--f-ui); font-size: 12.5px; color: var(--ink-3); margin-top: var(--s2); max-width: 70ch; line-height: 1.5; }
+
+/* ── Tree ─────────────────────────────────────────────────────────────────── */
+.tree { font-family: var(--f-mono); font-size: 12.4px; line-height: 1.7; background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: var(--s3) var(--s4); overflow-x: auto; margin: 0 0 var(--s4); white-space: pre; }
+.tree .d { color: var(--indigo); font-weight: 600; }
+.tree .cm { color: var(--ink-3); }
+
+
+/* ── Doc strip: canonical library docs for the section above ──────────────── */
+.docs {
+  display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3);
+  font-family: var(--f-ui); font-size: 12px; margin: 0 0 var(--s4);
+  padding: var(--s2) 0 0; max-width: var(--col); align-items: baseline;
+}
+.docs .lbl {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--ink-3); margin-right: 2px;
+}
+.docs a {
+  color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--rule);
+  padding-bottom: 1px;
+}
+.docs a:hover { color: var(--indigo); border-bottom-color: var(--indigo); }
+.docs a::after { content: " ↗"; font-size: 9px; color: var(--ink-3); }
+
+/* ── The build ladder: ordered step cards ────────────────────────────────── */
+/* Every domain section carries exactly one ol.steps ladder. Five fixed slots
+   per step, under one headline. Slot labels are real text, never CSS ::before — generated content is
+   unreliably exposed to screen readers and is lost when the card is copy-pasted.
+   The data-slot attribute drives layout and gives validate.mjs a robust hook. */
+.steps {
+  list-style: none; margin: 0 0 var(--s5); padding: 0; max-width: var(--col-w);
+  display: flex; flex-direction: column; gap: var(--s4);
+}
+.step {
+  border: 1px solid var(--rule); border-left: 3px solid var(--indigo); border-radius: 4px;
+  background: var(--surface); padding: var(--s3) var(--s4) var(--s4); margin: 0;
+}
+.step > h3 {
+  margin: 0 0 var(--s3); padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--rule-soft); font-size: 15px;
+}
+.step > h3 .n { color: var(--indigo); font-weight: 600; }
+
+.slot {
+  display: grid; grid-template-columns: 7.6em minmax(0, 1fr); gap: var(--s2) var(--s3);
+  align-items: baseline; margin: 0 0 var(--s3);
+}
+.slot:last-child { margin-bottom: 0; }
+.slot > .lbl {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); padding-top: .35em; white-space: nowrap;
+}
+.slot > :not(.lbl) { min-width: 0; }
+.slot p, .slot ul, .slot ol { max-width: none; margin: 0; font-size: 15.5px; }
+.slot li { margin-bottom: 3px; }
+.slot pre, .slot .tw, .slot .tree, .slot figure { margin: 0; }
+.slot pre { border-left-width: 2px; font-size: 12.2px; }
+
+/* Only two slots take a hue, and they are the two that carry consequence. */
+.slot[data-slot="trap"] > .lbl { color: var(--ember); }
+.slot[data-slot="done"] > .lbl { color: var(--teal); }
+
+.slot[data-slot="docs"] .lnks {
+  display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3);
+  font-family: var(--f-ui); font-size: 12px; align-items: baseline;
+}
+.slot[data-slot="docs"] a {
+  color: var(--ink-2); text-decoration: none;
+  border-bottom: 1px solid var(--rule); padding-bottom: 1px;
+}
+.slot[data-slot="docs"] a:hover { color: var(--indigo); border-bottom-color: var(--indigo); }
+.slot[data-slot="docs"] a::after { content: " ↗"; font-size: 9px; color: var(--ink-3); }
+
+@media (max-width: 700px) {
+  .slot { grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
+  .slot > .lbl { padding-top: 0; }
+}
+
+/* ── ADR entries ─────────────────────────────────────────────────────────── */
+.adr {
+  border: 1px solid var(--rule); border-radius: 4px; background: var(--surface);
+  padding: var(--s3) var(--s4); margin: 0 0 var(--s3); max-width: var(--col);
+}
+.adr-head {
+  display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: baseline;
+  margin-bottom: var(--s2);
+}
+.adr-id { font-family: var(--f-mono); font-size: 12px; font-weight: 600; color: var(--indigo); }
+.adr-t  { font-family: var(--f-ui); font-size: 14.5px; font-weight: 600; }
+.adr p { font-size: 15px; margin: 0 0 6px; max-width: none; }
+.adr p:last-child { margin-bottom: 0; }
+.adr .k {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-3); margin-right: 6px;
+}
+
+/* ── Review index cards ──────────────────────────────────────────────────── */
+.revs { display: flex; flex-direction: column; gap: var(--s2); max-width: var(--col); margin: 0 0 var(--s4); }
+.rev {
+  display: grid; grid-template-columns: auto 1fr auto; gap: var(--s3); align-items: baseline;
+  border: 1px solid var(--rule); border-left: 3px solid var(--indigo); border-radius: 4px;
+  background: var(--surface); padding: var(--s3) var(--s4); text-decoration: none; color: var(--ink);
+  font-family: var(--f-ui); font-size: 13.5px;
+}
+.rev:hover { border-left-color: var(--teal); background: var(--surface-2); }
+.rev .n { font-family: var(--f-mono); font-size: 12px; color: var(--indigo); font-weight: 600; }
+.rev .d { font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-3); }
+.rev-empty {
+  border: 1px dashed var(--rule); border-radius: 4px; padding: var(--s4);
+  color: var(--ink-3); font-family: var(--f-ui); font-size: 13.5px; max-width: var(--col);
+}
+
+/* ── Masthead meta bar ───────────────────────────────────────────────────── */
+.meta {
+  display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); margin-top: var(--s4);
+  font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-3);
+  border-top: 1px solid var(--rule-soft); padding-top: var(--s3);
+}
+.meta b { color: var(--ink-2); font-weight: 600; }
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+footer { border-top: 1px solid var(--rule); padding: var(--s5) 0 var(--s6); font-family: var(--f-ui); font-size: 13px; color: var(--ink-3); }
+footer p { max-width: 74ch; }
+</style>
+
+<div class="shell">
+<header class="mast">
+  <div class="eyebrow">
+    <span><b>p-harmonize</b></span>
+    <span>Architecture &amp; Engineering Guide</span>
+    <span>rev 2026-08-13 (v1)</span>
+  </div>
+  <h1>Map the columns without seeing the answer</h1>
+  <p class="dek" style="margin-bottom:0">A general clinical harmonizer that lifts 1..N cohorts into an OMOP CDM subset defined by a runtime concept pack — <em>with every mapping decision provably independent of the outcome variable</em>.</p>
+  <div class="meta"><span><b>plan</b> p-harmonize</span><span><b>format</b> 2 — nine-slot ladder</span><span><b>sections</b> 18</span><span><b>steps</b> 30</span><span><b>reviews</b> 0</span></div>
+</header>
+
+<div class="grid">
+<nav class="rail" aria-label="Section index">
+  <div class="rail-h">Sections</div>
+  <ol>
+    <li><a href="#s0"><span class="n">§0</span><span>The invariant everything else…</span></a></li>
+    <li><a href="#s0-2"><span class="n">§0.2</span><span>Build protocol for the implem…</span></a></li>
+    <li><a href="#s1"><span class="n">§1</span><span>Ingest</span></a></li>
+    <li><a href="#s2"><span class="n">§2</span><span>Profile</span></a></li>
+    <li><a href="#s3"><span class="n">§3</span><span>Link within a cohort</span></a></li>
+    <li><a href="#s4"><span class="n">§4</span><span>Propose</span></a></li>
+    <li><a href="#s5"><span class="n">§5</span><span>Confirm</span></a></li>
+    <li><a href="#s6"><span class="n">§6</span><span>Map</span></a></li>
+    <li><a href="#s7"><span class="n">§7</span><span>Derive endpoints</span></a></li>
+    <li><a href="#s8"><span class="n">§8</span><span>Coverage</span></a></li>
+    <li><a href="#s9"><span class="n">§9</span><span>Emit</span></a></li>
+    <li><a href="#s10"><span class="n">§10</span><span>Test architecture</span></a></li>
+    <li><a href="#s11"><span class="n">§11</span><span>Config, environment, dependen…</span></a></li>
+    <li><a href="#s12"><span class="n">§12</span><span>Anti-patterns</span></a></li>
+    <li><a href="#s13"><span class="n">§13</span><span>Canonical references</span></a></li>
+    <li><a href="#s14"><span class="n">§14</span><span>Build standards</span></a></li>
+    <li><a href="#s15"><span class="n">§15</span><span>Decision log</span></a></li>
+    <li><a href="#s16"><span class="n">§16</span><span>Review log</span></a></li>
+  </ol>
+</nav>
+
+<main>
+<section id="s0">
+  <h2><span class="n">§0</span><span>The invariant everything else serves</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://ohdsi.github.io/TheBookOfOhdsi/DataQuality.html">Book of OHDSI — data quality</a>
+    <a href="https://ohdsi.github.io/CommonDataModel/cdm54.html">OMOP CDM v5.4</a>
+    <a href="https://www.nextflow.io/docs/latest/channel.html">Nextflow — channels</a>
+  </div>
+
+  <div class="plaque">
+    <p class="eq">Outcome-Blind Mapping</p>
+    <p class="gloss">No harmonization decision — column match, value mapping, unit conversion,
+    endpoint derivation, or linkage threshold — may be a function of the outcome variable.</p>
+  </div>
+
+  <p class="lead">A leak at the value level is caught by cross-validation. A leak in the
+  <em>schema</em> is not: by the time a model sees the data, the leak is the column definition,
+  and every honesty check downstream runs against columns that already know the answer. The
+  tempting move — try both response codings, keep the one with the cleaner survival split — is
+  label leakage wearing a data-cleaning costume.</p>
+
+  <h3><span class="n">§0.1</span><span>The falsification test</span></h3>
+
+  <pre><code><span class="c"># Permute the outcome within each cohort. Re-run the proposer. Hash the ledger.</span>
+nextflow run . -profile test,docker --permute_outcome_seed 1..100 --stop_after propose
+sha256sum results/ledger.proposed.yaml   <span class="c"># must be identical for all 100</span>
+
+<span class="c"># Any difference is a schema-level leak. Not a warning — a build failure.</span>
+<span class="c"># The pack's `outcome: true` flag is what the test keys on, so the invariant</span>
+<span class="c"># binds whatever THIS pack calls an outcome, never a hard-coded column name.</span>
+<span class="c"># That is what lets one test defend an oncology run and a critical-care run.</span></code></pre>
+
+  <h3><span class="n">§0.3</span><span>The second contract — provenance completeness</span></h3>
+
+  <pre><code><span class="c"># Not the invariant, but enforced beside it. Every emitted cell resolves to:</span>
+(cohort_id, dataset_id, source_column, source_value, rule_id, rule_version)
+
+harmonize --audit measurement:1187423:value_as_number
+<span class="c">#  -&gt; COHORT_A / clinical.csv / "PDL1_PCT" / "45%" / R-0142 / 1.2.0</span></code></pre>
+
+  <ul>
+    <li>A harmonizer whose output cannot be walked back to a source cell is a rewrite, not a mapping.</li>
+    <li>Provenance is a table (<code>provenance.parquet</code>), not a log — it must be joinable.</li>
+    <li><code>rule_version</code> is what makes a rerun after a pack bump diffable rather than mysterious.</li>
+  </ul>
+
+  <h3><span class="n">§0.4</span><span>The two operations this pipeline must never conflate</span></h3>
+
+  <figure>
+    <svg role="img" aria-label="Within a cohort, datasets are joined patient-wise; across cohorts, harmonized tables are unioned variable-wise" viewBox="0 0 660 250" width="660" height="250">
+      <g fill="none" stroke="currentColor" stroke-width="1.4">
+        <rect x="14" y="26" width="120" height="34" rx="3"/>
+        <rect x="14" y="72" width="120" height="34" rx="3"/>
+        <rect x="14" y="118" width="120" height="34" rx="3"/>
+        <rect x="212" y="72" width="120" height="34" rx="3"/>
+        <rect x="212" y="176" width="120" height="34" rx="3"/>
+        <rect x="430" y="118" width="150" height="46" rx="3"/>
+        <path d="M134 43 C 176 43, 176 86, 208 86"/>
+        <path d="M134 89 L 208 89"/>
+        <path d="M134 135 C 176 135, 176 92, 208 92"/>
+        <path d="M332 89 C 388 89, 388 136, 426 136"/>
+        <path d="M332 193 C 388 193, 388 148, 426 148"/>
+      </g>
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="11">
+        <text x="26" y="47">clinical.csv</text>
+        <text x="26" y="93">treatment.csv</text>
+        <text x="26" y="139">biopsy.csv</text>
+        <text x="224" y="93">cohort A · linked</text>
+        <text x="224" y="197">cohort B · linked</text>
+        <text x="442" y="139">OMOP CDM subset</text>
+        <text x="442" y="156">+ pack extension</text>
+        <text x="150" y="172" fill="var(--indigo)" font-weight="600">JOIN</text>
+        <text x="150" y="187">same patients,</text>
+        <text x="150" y="201">new variables</text>
+        <text x="352" y="60" fill="var(--indigo)" font-weight="600">UNION</text>
+        <text x="352" y="75">same variables,</text>
+        <text x="352" y="89">new patients</text>
+      </g>
+    </svg>
+    <figcaption>Within a cohort, across datasets, the operation is a patient-level JOIN — entity
+    resolution, whose failure mode is that relapse and multi-biopsy rows multiply N silently.
+    Across cohorts the operation is a UNION — schema matching plus vocabulary reconciliation,
+    whose failure mode is that two different things map to one concept. Different machinery,
+    different diagnostics. Conflating them is the most common defect in ad-hoc harmonization.</figcaption>
+  </figure>
+
+  <h3><span class="n">§0.5</span><span>Generality principles this pipeline is bound by</span></h3>
+
+  <div class="tw"><table>
+    <thead><tr><th>#</th><th>Principle</th><th>How it is checked</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>nf-core template; <code>nf-core lint</code> clean</td><td>CI job</td></tr>
+      <tr><td class="num">2</td><td>nf-core/modules first; a local module needs a justification in its <code>why</code></td><td>review</td></tr>
+      <tr><td class="num">3</td><td>Standalone execution is mandatory — green under <code>-profile test,docker</code> with no sibling pipeline installed</td><td>CI job</td></tr>
+      <tr><td class="num">4</td><td>Standard formats only — OMOP tables, Parquet with a published JSON Schema</td><td>§9.1</td></tr>
+      <tr><td class="num">5</td><td>An upstream pipeline's output is <em>a</em> valid input, never <em>the</em> input</td><td>§1.1</td></tr>
+      <tr><td class="num">6</td><td>Params live in <code>nextflow_schema.json</code>; no magic numbers in process bodies</td><td>§11.1</td></tr>
+      <tr><td class="num">7</td><td><code>nf-test</code> at module and pipeline level; <code>versions.yml</code> from every process</td><td>§10.2</td></tr>
+      <tr><td class="num">8</td><td>Containers from biocontainers; a bespoke image needs an ADR</td><td>§11.2</td></tr>
+      <tr><td class="num">9</td><td>Held-out data is a setting, not a ritual — excluded at channel construction</td><td>§1.2</td></tr>
+      <tr><td class="num">10</td><td>No hard-coded biology — no disease term, gene symbol or cohort name in process logic</td><td>§10.3</td></tr>
+      <tr><td class="num">11</td><td>The report is a view over emitted artifacts, never a second implementation</td><td>§9.3</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="n">§0.6</span><span>Source tree, and the command that creates it</span></h3>
+
+  <pre data-brief="tree"><code>nf-core create --name clinical-harmonize \
+  --description "Multi-cohort clinical data harmonization to an OMOP CDM subset" \
+  --author "&lt;you&gt;" --version 0.1.0dev</code></pre>
+
+  <div class="tree"><span class="d">clinical-harmonize/</span>
+├── main.nf                       <span class="cm"># entry point; wires workflows/ and nothing else</span>
+├── nextflow.config               <span class="cm"># + conf/{base,test,test_full}.config</span>
+├── nextflow_schema.json          <span class="cm"># EVERY params row in §1–§11 (§11.1)</span>
+├── <span class="d">assets/</span>
+│   ├── schema_input.json         <span class="cm"># the two-level samplesheet (§1.1)</span>
+│   ├── <span class="d">packs/</span>*.yaml              <span class="cm"># concept packs — the target variable set (§4.1)</span>
+│   ├── blocking_rules.yaml       <span class="cm"># §3.1</span>
+│   ├── comparisons.yaml          <span class="cm"># §3.2, incl. the missing level</span>
+│   ├── unit_patterns.yaml        <span class="cm"># §2.2</span>
+│   ├── ucum_factors.yaml         <span class="cm"># §6.2, analyte-aware</span>
+│   └── forbidden_terms.txt       <span class="cm"># §10.3 — the generality grep list</span>
+├── <span class="d">workflows/</span>
+│   └── harmonize.nf              <span class="cm"># the stage graph in §0.9; no process bodies</span>
+├── <span class="d">subworkflows/local/</span>
+│   ├── ingest.nf  profile.nf  link.nf  propose.nf
+│   └── confirm.nf  map.nf  derive.nf  coverage.nf  emit.nf
+├── <span class="d">modules/local/</span>&lt;name&gt;/
+│   ├── main.nf                   <span class="cm"># one process; emits versions.yml (§11.2)</span>
+│   ├── meta.yml                  <span class="cm"># nf-core module metadata</span>
+│   └── environment.yml
+├── <span class="d">report/</span>                       <span class="cm"># _quarto.yml index.qmd qc.qmd results.qmd provenance.qmd</span>
+├── <span class="d">tests/</span>                        <span class="cm"># one .nf.test per §10.2 row</span>
+└── <span class="d">docs/</span>                         <span class="cm"># usage.md, output.md — nf-core lint requires both</span></div>
+
+  <h3><span class="n">§0.7</span><span>Build order — which ladder is built first, and why</span></h3>
+
+  <div class="tw" data-brief="order"><table>
+    <thead><tr><th>#</th><th>Build</th><th>Ladder</th><th>Why it sits here</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>repo skeleton + params file</td><td>§11.1</td><td>every later step <em>adds</em> a property to a <code>nextflow_schema.json</code> that must already exist and validate</td></tr>
+      <tr><td class="num">2</td><td>ingest + the holdout seal</td><td>§1</td><td>no table may be read before the seal exists, or the first debug run stages a held-out path</td></tr>
+      <tr><td class="num">3</td><td>profile</td><td>§2</td><td>the entire evidence base §4 consumes; a channel with no source field is dead on arrival</td></tr>
+      <tr><td class="num">4</td><td><strong>the invariant harness</strong></td><td>§10.1</td><td><strong>before the proposer, not after.</strong> §0.2 step 2 says write the failing test first — a harness written after §4 is a harness written to pass</td></tr>
+      <tr><td class="num">5</td><td>propose</td><td>§4</td><td>the first stage §0's invariant actually binds</td></tr>
+      <tr><td class="num">6</td><td>confirm + rule compiler</td><td>§5</td><td>turns decisions into the addressable rules every later stage stamps onto its output</td></tr>
+      <tr><td class="num">7</td><td>link</td><td>§3</td><td><strong>the one reorder from data-flow order.</strong> Linkage needs only §2, so it is independent of §4–§6 and can be built in parallel; it is placed here so the invariant work is not blocked behind entity resolution</td></tr>
+      <tr><td class="num">8</td><td>map</td><td>§6</td><td>needs §5's ruleset and §3's person ids</td></tr>
+      <tr><td class="num">9</td><td>derive endpoints</td><td>§7</td><td>needs mapped rows and normalised dates</td></tr>
+      <tr><td class="num">10</td><td>coverage</td><td>§8</td><td>needs the canonical rows to be complete before it can report what they cost</td></tr>
+      <tr><td class="num">11</td><td>emit + manifest + provenance</td><td>§9</td><td>needs every rule_id that will ever be stamped</td></tr>
+      <tr><td class="num">12</td><td>report</td><td>§9.3</td><td><code>results/</code> must exist before a view over it can be written</td></tr>
+      <tr><td class="num">13</td><td>container pins + versions</td><td>§11.2</td><td>pin as each module lands; audit for floating tags here</td></tr>
+      <tr><td class="num">14</td><td>generality run + grep</td><td>§10.3</td><td>last, because it greps the finished <code>modules/</code> and <code>workflows/</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="n">§0.8</span><span>Toolchain pins</span></h3>
+
+  <div class="tw" data-brief="pins"><table>
+    <thead><tr><th>Tool</th><th>Pinned at</th><th>Why this pin</th></tr></thead>
+    <tbody>
+      <tr><td>Nextflow</td><td><code>26.04.6</code></td><td>DSL2 and the channel semantics §1.2's seal depends on; set <code>nextflowVersion</code> in <code>nextflow.config</code></td></tr>
+      <tr><td>nf-core/tools</td><td><code>4.1.0</code></td><td>the template and the lint rules principle 1 is checked against</td></tr>
+      <tr><td>nf-schema</td><td><code>2.8.0</code></td><td>validates both <code>nextflow_schema.json</code> (§11.1) and <code>schema_input.json</code> (§1.1)</td></tr>
+      <tr><td>nf-test</td><td><code>0.9.5</code></td><td>every <code>done</code> slot in this document becomes an assertion here</td></tr>
+      <tr><td>Quarto</td><td><code>1.10.18</code></td><td>renders §9.3; pinned because a render that silently changes is a report that silently changes</td></tr>
+      <tr><td>DuckDB</td><td><code>1.5.5</code></td><td>profiling (§2.1) and the Parquet joins in §8; quantile semantics differ between engines, so this is not cosmetic</td></tr>
+      <tr><td>ATHENA vocabulary</td><td>per-run</td><td>not a toolchain pin — the <em>pack</em> pins the release and the manifest records its hash (§9.2)</td></tr>
+    </tbody>
+  </table></div>
+
+  <p>Versions verified 2026-08-13. A pin is a claim about reproducibility: bump one,
+  re-run §10.1, and record the bump in §15 if any hash moved.</p>
+
+  <h3><span class="n">§0.9</span><span>The stage graph — what each stage hands the next</span></h3>
+
+  <pre data-brief="dag"><code>  samplesheet.csv ─┐
+  concept pack ────┴─▶ <span class="k">§1 INGEST</span>      ch_open        held-out rows never emitted
+                            │
+              ┌─────────────┴─────────────┐
+              ▼                           ▼
+        <span class="k">§2 PROFILE</span>                  <span class="k">§3 LINK</span>       (needs only §2's records)
+     profiles/*.json                link/links.parquet
+              │                           │
+              ▼                           │
+        <span class="k">§4 PROPOSE</span>   ledger.proposed.yaml  │   ◀── <span class="bad">§10.1 permutes the outcome HERE</span>
+              │                           │        and hashes this file
+              ▼                           │
+        <span class="k">§5 CONFIRM</span>   ledger.confirmed.yaml │
+              │      → rules/ruleset.json │
+              └─────────────┬─────────────┘
+                            ▼
+                       <span class="k">§6 MAP</span>        mapped/&lt;domain&gt;.parquet
+                            ▼
+                       <span class="k">§7 DERIVE</span>     derived/endpoints.parquet
+                            ▼
+                       <span class="k">§8 COVERAGE</span>   coverage/{matrix,frontier,missingness,std_diff}
+                            ▼
+                       <span class="k">§9 EMIT</span>       results/omop/* + mapping_manifest.json
+                            ▼                      + provenance.parquet
+                       <span class="k">§9.3 REPORT</span>   results/_site   ◀── reads results/ ONLY</code></pre>
+</section>
+
+<section id="s0-2">
+  <h2><span class="n">§0.2</span>Build protocol for the implementing agent</h2>
+  <div class="docs"><a href="https://www.nextflow.io/docs/latest/index.html">Nextflow docs</a> <a href="https://nf-co.re/docs/guidelines/pipelines/overview">nf-core pipeline guidelines</a></div>
+  <div class="note stop">
+    <p>For each step, in ladder order:</p>
+    <pre><code>1. Read §0 (the invariant) and this step's card. Read nothing else.
+2. Write the failing test from `done` FIRST. Confirm it fails.
+3. Fetch the `docs` links. Your training data is stale; the pins are not.
+4. Implement to `contract`, at the paths `contract` names. Nothing more.
+5. Honour `nogo`. Absent instruction is not licence.
+6. Every `params` row becomes a nextflow_schema.json property with that
+   exact default. No magic numbers in code.
+7. Build behind the `alts` seam even when only one alternative exists today.
+8. Run the `done` command. Output must match. Stop; do not begin the next step.</code></pre>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="n">§1</span><span>Ingest — the two-level samplesheet and the holdout seal</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://nextflow-io.github.io/nf-schema/latest/nextflow_schema/sample_sheet_schema_specification/">nf-schema — samplesheet schema</a>
+    <a href="https://www.nextflow.io/docs/latest/channel.html">Nextflow — channel operators</a>
+    <a href="https://json-schema.org/understanding-json-schema">JSON Schema</a>
+  </div>
+
+  <p class="lead">Two levels, because the data has two levels: a cohort holds many datasets, and
+  the JOIN happens inside a cohort while the UNION happens across them. A flat sheet cannot express
+  that difference, so a flat sheet makes §0.3's conflation the default.</p>
+
+  <ol class="steps">
+    <li class="step" id="s1-1">
+      <h3><span class="n">§1.1</span><span>Validate the two-level samplesheet into a typed channel</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>The samplesheet is the pipeline's own entry point, not a handshake with an upstream
+        tool (principle 5). Validating it here means every later stage can assume a cohort id, a
+        dataset role and a holdout flag exist, and no later stage needs a null check.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   --input  samplesheet.csv
+     --concept_pack  assets/packs/&lt;name&gt;.yaml | path | url
+OUT  ch_datasets : [ meta(cohort_id, dataset_id, role, holdout), path(table) ]
+     ch_pack     : [ pack_hash, [variable, ...] ]
+SIDE fails fast on duplicate (cohort_id, dataset_id); writes no files</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># assets/schema_input.json -> validated by nf-schema</span>
+cohort_id,dataset_id,role,path,holdout
+COHORT_A,clinical,clinical,/data/a/clin.csv,false
+COHORT_A,treatment,treatment,/data/a/tx.parquet,false
+COHORT_B,clinical,clinical,/data/b/clin.tsv,true
+
+<span class="c"># role  : enum — clinical | treatment | biopsy | imaging | other</span>
+<span class="c"># holdout: boolean — see §1.2; excluded at channel construction</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>input</code></td><td>—</td><td>path</td><td>the two-level samplesheet</td><td>CLI, required</td></tr>
+          <tr><td><code>concept_pack</code></td><td><code>assets/packs/minimal.yaml</code></td><td>path or url</td><td>declares the target variables; the pipeline has no other notion of what to map to</td><td>CLI</td></tr>
+          <tr><td><code>allow_single_dataset</code></td><td><code>false</code></td><td>boolean</td><td>permits a cohort with one dataset (skips §3 entirely for it)</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>SheetReader</code> — <code>read(path) -&gt; [(Meta, Path)]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>nested YAML sheet</td><td>expresses cohort→dataset nesting natively; no repeated cohort_id</td><td>loses nf-schema CSV validation; one custom validator</td></tr>
+          <tr><td>an OMOP-native manifest</td><td>a cohort already in CDM form skips §6 entirely</td><td>a second entry path and a second schema to keep in step</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Making <code>cohort_id</code> the primary key. It is not: <code>(cohort_id, dataset_id)</code>
+        is. A sheet with two rows sharing both is a silent duplication that survives to the
+        emitted tables, where it looks like a linkage failure in §3.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not read a single byte of any table. Do not infer <code>role</code> from a filename.
+        Never accept a sheet lacking the <code>holdout</code> column — absent is not false.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://nextflow-io.github.io/nf-schema/latest/nextflow_schema/sample_sheet_schema_specification/">nf-schema samplesheet spec</a>
+          <a href="https://json-schema.org/understanding-json-schema">JSON Schema reference</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/ingest.nf.test
+nextflow run . -profile test,docker --stop_after ingest</code></pre>
+        <p>A sheet with a duplicate <code>(cohort_id, dataset_id)</code> exits non-zero naming both rows.</p></div>
+    </li>
+
+    <li class="step" id="s1-2">
+      <h3><span class="n">§1.2</span><span>Drop held-out datasets at channel construction, not at read time</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>A held-out dataset that reaches a process can be read by a bug. One that was never
+        emitted into the channel cannot. Moving the seal from runtime to graph construction turns
+        "we did not look" from a promise into a property of the DAG.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   ch_datasets (all rows)
+     --unseal &lt;dataset_id&gt;   optional, repeatable
+     locked_model.json       required IF --unseal is given
+OUT  ch_open   : rows with holdout == false, plus any unsealed row
+     unseal.log: appended (timestamp, dataset_id, git_sha, params_hash)
+SIDE refuses to start when --unseal has no matching locked_model.json</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># workflows/harmonize.nf</span>
+ch_open = ch_datasets.filter { meta, _ -&gt;
+    !meta.holdout || meta.dataset_id in params.unseal
+}
+<span class="c"># locked_model.json — hashed BEFORE any held-out row is admitted</span>
+{ "analysis_git_sha": str, "params_hash": str,
+  "locked_at": iso8601, "covers": [dataset_id] }</code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>unseal</code></td><td><code>[]</code></td><td>list of dataset_id</td><td>admits named held-out datasets; refuses without a matching lock</td><td>CLI</td></tr>
+          <tr><td><code>locked_model</code></td><td><code>locked_model.json</code></td><td>path</td><td>the lock <code>--unseal</code> is checked against</td><td>CLI</td></tr>
+          <tr><td><code>unseal_log</code></td><td><code>unseal.log</code></td><td>path</td><td>append-only audit trail</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>HoldoutPolicy</code> — <code>admit(Meta, Lock?) -&gt; bool</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>per-fold rotation (LODO)</td><td>leave-one-dataset-out needs each dataset held out in turn, which one boolean cannot express</td><td>the flag becomes a fold assignment; the lock must cover a fold, not a run</td></tr>
+          <tr><td>log-only unsealing</td><td>simpler; no lock file to manage</td><td>records the violation after the damage — a seen number cannot be unseen</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Filtering inside the process that reads the table. By then the path is staged, the
+        file is on disk in the work directory, and any later <code>cat</code> in a debug session
+        opens it. The seal has to be upstream of staging or it is decoration.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not let <code>--unseal</code> proceed without a hash-matching lock. Never write the
+        unseal log anywhere the run can overwrite. Do not silently ignore an unknown dataset id.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://www.nextflow.io/docs/latest/channel.html">Nextflow channel operators</a>
+          <a href="https://www.nextflow.io/docs/latest/process.html">Nextflow process inputs</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker --unseal COHORT_B   <span class="c"># exits 1: no lock</span>
+grep -c COHORT_B .nextflow.log                         <span class="c"># 0 staged paths</span></code></pre>
+        <p>With no lock present the run refuses; <code>unseal.log</code> is unchanged.</p></div>
+    </li>
+  </ol>
+</section>
+<section id="s2">
+  <h2><span class="n">§2</span><span>Profile — the column evidence record</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://duckdb.org/docs/">DuckDB</a>
+    <a href="https://docs.pola.rs/">Polars</a>
+    <a href="https://arrow.apache.org/docs/python/parquet.html">Arrow — Parquet</a>
+    <a href="https://ohdsi.github.io/TheBookOfOhdsi/DataQuality.html">Book of OHDSI — data quality</a>
+  </div>
+
+  <p class="lead">The profile is the only thing the matcher ever sees. A channel whose evidence
+  the profiler did not capture is not a weak channel — it is a dead one, and it fails by scoring
+  every candidate equally, which reads as "no strong match" rather than as a bug.</p>
+
+  <ol class="steps">
+    <li class="step" id="s2-1">
+      <h3><span class="n">§2.1</span><span>Profile every column into a typed evidence record</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Every downstream evidence channel reads exactly one field of this record. Fixing the
+        record's shape here fixes what the matcher is capable of noticing, so the field list is a
+        design decision about detection power, not a convenience.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   [ meta(cohort_id, dataset_id), path(table) ]
+OUT  profiles/&lt;cohort_id&gt;.&lt;dataset_id&gt;.json   one record per COLUMN
+SIDE none — a pure function of the table bytes and the params below</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># modules/local/profile_columns/main.nf -&gt; profiles/*.json</span>
+{ "column": str,                  <span class="c"># verbatim source name, never normalised here</span>
+  "inferred_type": "int|float|str|date|bool|empty",
+  "n_rows": int, "n_missing": int, "n_unique": int,
+  "unique_values": [str],         <span class="c"># the SET, capped; null when over cap</span>
+  "unique_truncated": bool,       <span class="c"># explicit: absence != "few values"</span>
+  "quantiles": [float],           <span class="c"># p0 p1 p25 p50 p75 p99 p100; numeric only</span>
+  "candidate_units": [str],       <span class="c"># parsed from the header, UCUM-normalised</span>
+  "example_values": [str] }       <span class="c"># first k non-missing, for the ledger</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>max_unique_listed</code></td><td><code>500</code></td><td>1..100000</td><td>caps the stored unique-value set; over it, sets <code>unique_truncated</code></td><td>config</td></tr>
+          <tr><td><code>date_formats</code></td><td><code>["%Y-%m-%d","%Y-%m","%Y"]</code></td><td>strftime list</td><td>what parses as a date — and therefore what becomes a partial date in §7.1</td><td>config</td></tr>
+          <tr><td><code>example_k</code></td><td><code>5</code></td><td>0..50</td><td>example values carried into the ledger for the human gate</td><td>config</td></tr>
+          <tr><td><code>na_strings</code></td><td><code>["","NA","NULL","."]</code></td><td>string list</td><td>what counts as missing; wrong here inflates cardinality everywhere</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>Profiler</code> — <code>profile(table) -&gt; [ColumnProfile]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>DuckDB <code>SUMMARIZE</code></td><td>out-of-core on tables that exceed RAM</td><td>no unique-value set without a second query</td></tr>
+          <tr><td>ydata-profiling</td><td>rich stats and an HTML report for free</td><td>heavy dependency; slow on wide clinical tables</td></tr>
+          <tr><td>Polars <code>describe</code></td><td>fastest in-memory path</td><td>quantile semantics differ from DuckDB's; pin one</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Storing cardinality and dropping the unique-value set. Cardinality says a column has
+        five values; the set says they are <code>{CR,PR,SD,PD,NE}</code>, which is what identifies
+        a RECIST column against a concept's value set. Only the set survives a full rename.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not normalise, lowercase or strip the column name — §4.1 needs it verbatim. Never
+        drop a column that fails to parse; §2.3 manifests it. Do not read the outcome column
+        differently from any other.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://duckdb.org/docs/">DuckDB documentation</a>
+          <a href="https://docs.pola.rs/">Polars user guide</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker --stop_after profile
+jq -e '.[] | select(.column=="gender") | .unique_values | length &gt; 0' \
+   results/profiles/eunomia.person.json</code></pre>
+        <p>Every column in every fixture table has exactly one record.</p></div>
+    </li>
+
+    <li class="step" id="s2-2">
+      <h3><span class="n">§2.2</span><span>Normalise candidate units without committing to one</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>A unit written in a header (<code>PDL1 (%)</code>, <code>CREAT_mgdL</code>) is evidence,
+        not truth. Parsing it into UCUM here lets §4.2's unit-plausibility channel score it against
+        the value range, which is the only channel that catches a days/months confusion.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   profiles/*.json  (column name + quantiles)
+OUT  same records, `candidate_units` populated: [{ucum, source, confidence}]
+SIDE none; ambiguity is RECORDED, never resolved here</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># candidate_units — ordered, never a single value</span>
+[ { "ucum": "%",      "source": "header:(%)",   "confidence": 0.9 },
+  { "ucum": "1",      "source": "range:0..100", "confidence": 0.3 } ]
+
+<span class="c"># A column with NO parseable unit gets [] — not a guessed default.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>unit_header_patterns</code></td><td><code>assets/unit_patterns.yaml</code></td><td>path</td><td>the regexes that lift a unit out of a header</td><td>config</td></tr>
+          <tr><td><code>ucum_release</code></td><td><code>2.2</code></td><td>version string</td><td>pins the unit grammar; recorded in the manifest</td><td>config</td></tr>
+          <tr><td><code>infer_unit_from_range</code></td><td><code>true</code></td><td>boolean</td><td>adds a low-confidence candidate from the value range alone</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>UnitParser</code> — <code>parse(header, quantiles) -&gt; [UnitCandidate]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>a UCUM library parser</td><td>full grammar rather than a pattern list</td><td>an extra container; most clinical headers are not valid UCUM anyway</td></tr>
+          <tr><td>LOINC-driven units</td><td>the concept already declares its expected unit</td><td>only works once a candidate concept exists — i.e. after §4, not before</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Emitting one unit instead of a ranked list. <code>mg/dL</code> to <code>mmol/L</code> is
+        an analyte-specific factor, so a single committed guess is a silent conversion error later;
+        a ranked list lets §6.2 refuse and the ledger show why.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not convert any value. Do not default an empty candidate list to the concept's
+        expected unit — that is §6.2's decision and it must be recorded.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ucum.org/ucum">UCUM specification</a>
+          <a href="https://github.com/ucum-org/ucum">ucum-org/ucum</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/profile_units.nf.test</code></pre>
+        <p>A header <code>OS_MONTHS</code> over a 0–60 range yields both a month and a
+        low-confidence day candidate, never one.</p></div>
+    </li>
+
+    <li class="step" id="s2-3">
+      <h3><span class="n">§2.3</span><span>Manifest unprofilable columns instead of dropping them</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>A column that failed to parse is the most informative column in the table: it is where
+        the source data disagrees with every assumption. Dropping it silently converts a finding
+        into a coverage number nobody can explain.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   profiling failures (encoding, mixed type, unreadable)
+OUT  profiles/_failed.json  [{cohort_id, dataset_id, column, reason, sample}]
+SIDE exit non-zero when the failure RATE exceeds --max_failed_frac</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>{ "cohort_id": str, "dataset_id": str, "column": str,
+  "reason": "encoding|mixed_type|unreadable|all_missing",
+  "sample": [str] }        <span class="c"># first k offending raw values, verbatim</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>max_failed_frac</code></td><td><code>0.05</code></td><td>0.0..1.0</td><td>above this fraction of columns, the run fails rather than reports</td><td>config</td></tr>
+          <tr><td><code>fail_sample_k</code></td><td><code>3</code></td><td>0..20</td><td>offending values carried into the manifest</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>FailurePolicy</code> — <code>onFail(column, reason) -&gt; skip | fail</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>fail on the first bad column</td><td>strictest; nothing slips through</td><td>unusable on real clinical exports, which always have one junk column</td></tr>
+          <tr><td>quarantine to a side table</td><td>keeps raw values for later rescue</td><td>a second output path and a PII question nobody has answered</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Treating an all-missing column as a failure. It is a successful profile of an empty
+        column, and §8's coverage matrix needs it present-but-empty to distinguish "cohort never
+        measured this" from "cohort has no such column".</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not repair, re-encode or coerce a failing column. Never omit a failed column from
+        the manifest because it looked unimportant.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ohdsi.github.io/TheBookOfOhdsi/DataQuality.html">Book of OHDSI — data quality</a>
+          <a href="https://github.com/OHDSI/DataQualityDashboard">DataQualityDashboard</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker --stop_after profile
+test -f results/profiles/_failed.json</code></pre>
+        <p>A deliberately mixed-type fixture column appears in <code>_failed.json</code> with its
+        raw sample, and the run still succeeds.</p></div>
+    </li>
+  </ol>
+</section>
+
+<section id="s3">
+  <h2><span class="n">§3</span><span>Link within a cohort — probabilistic record linkage</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://moj-analytical-services.github.io/splink/">splink</a>
+    <a href="https://moj-analytical-services.github.io/splink/topic_guides/theory/fellegi_sunter.html">Fellegi–Sunter model</a>
+    <a href="https://moj-analytical-services.github.io/splink/topic_guides/blocking/blocking_rules.html">blocking rules</a>
+    <a href="https://duckdb.org/docs/">DuckDB</a>
+  </div>
+
+  <p class="lead">This is the JOIN half of §0.4, and it is the half that changes N. Over-linkage
+  merges distinct patients and N shrinks; under-linkage splits one patient and N inflates. A model
+  downstream cannot tell them apart, so the only place either is visible is here.</p>
+
+  <ol class="steps">
+    <li class="step" id="s3-1">
+      <h3><span class="n">§3.1</span><span>Block candidate pairs so comparison is tractable</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Comparing every pair is quadratic and unnecessary. Blocking is where the recall ceiling
+        is set: a pair excluded by every blocking rule can never be matched, no matter how good the
+        comparison model is, and no later stage can tell it was excluded.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   a cohort's datasets, one row per patient-record
+OUT  candidate pairs (left_id, right_id, blocking_rule_id)
+     link/blocking_report.json  { rule_id, n_pairs, n_records_unblocked }
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># assets/blocking_rules.yaml — a LIST; recall is their union</span>
+- id: br_dob_sex   on: [birth_date, sex]
+- id: br_name3     on: [substr(last_name,1,3), birth_year]
+- id: br_mrn       on: [mrn]
+
+<span class="c"># blocking_report.json records n_records_unblocked — records no rule</span>
+<span class="c"># ever placed in a block. That number is the recall ceiling's shadow.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>blocking_rules</code></td><td><code>assets/blocking_rules.yaml</code></td><td>path</td><td>the rule list; their union sets maximum recall</td><td>config</td></tr>
+          <tr><td><code>max_block_size</code></td><td><code>10000</code></td><td>100..10^6</td><td>a block larger than this is reported and skipped, not silently expanded</td><td>config</td></tr>
+          <tr><td><code>max_pairs_warn_frac</code></td><td><code>0.1</code></td><td>0.0..1.0</td><td>warns when candidate pairs exceed this fraction of the full cross product</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>Blocker</code> — <code>block(records, rules) -&gt; [CandidatePair]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>sorted neighbourhood</td><td>degrades gracefully on typos at a key's head</td><td>a window parameter that is harder to justify than a rule list</td></tr>
+          <tr><td>locality-sensitive hashing</td><td>no hand-written rules at all</td><td>recall becomes opaque; the ceiling stops being inspectable</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Choosing rules by how many pairs they produce. The rule that produces the fewest pairs
+        is usually the one excluding the hard cases, and a match-weight histogram with no overlap
+        region is that mistake showing up as an apparently clean result.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not score, threshold or decide anything. Never let a blocking rule reference the
+        outcome variable or any column the pack marks <code>outcome: true</code>.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://moj-analytical-services.github.io/splink/topic_guides/blocking/blocking_rules.html">splink — blocking rules</a>
+          <a href="https://duckdb.org/docs/">DuckDB</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test_full,docker --stop_after block
+jq -e '.[] | .n_records_unblocked' results/link/blocking_report.json</code></pre>
+        <p>Every rule reports its pair count and the unblocked-record count is present, even at zero.</p></div>
+    </li>
+
+    <li class="step" id="s3-2">
+      <h3><span class="n">§3.2</span><span>Score pairs with a Fellegi–Sunter model, missing as its own outcome</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>m and u — agreement given the same person, agreement given different people — turn field
+        comparisons into a log-likelihood ratio that is comparable across fields. Everything about
+        the linkage's honesty lives in whether those two probabilities were estimated or assumed.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   candidate pairs + the cohort's records
+OUT  link/scores.parquet  (left_id, right_id, match_weight, per_field_agreement)
+     link/model.json      the estimated m and u per field, per level
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># Three-way agreement — NOT binary. This is the whole step.</span>
+agree | disagree | missing        <span class="c"># missing gets its own m,u pair</span>
+
+match_weight = log2( P(pattern | match) / P(pattern | non-match) )
+             = sum_over_fields log2( m_f(level) / u_f(level) )
+
+<span class="c"># link/model.json</span>
+{ "field": "birth_date", "levels": [
+    {"level":"agree","m":0.94,"u":0.003},
+    {"level":"missing","m":0.04,"u":0.05} ] }</code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>link_em_iterations</code></td><td><code>20</code></td><td>1..200</td><td>EM passes estimating m; too few leaves m at its prior</td><td>config</td></tr>
+          <tr><td><code>link_comparison_spec</code></td><td><code>assets/comparisons.yaml</code></td><td>path</td><td>per-field comparison levels, including the missing level</td><td>config</td></tr>
+          <tr><td><code>link_u_from_random_pairs</code></td><td><code>true</code></td><td>boolean</td><td>estimates u by sampling random pairs rather than assuming it</td><td>config</td></tr>
+          <tr><td><code>link_random_pair_n</code></td><td><code>1000000</code></td><td>10^4..10^8</td><td>sample size for the u estimate</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>PairScorer</code> — <code>score(pair) -&gt; (weight, [FieldAgreement])</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>deterministic rule cascade</td><td>fully explainable; no EM to justify</td><td>brittle to typos; no calibrated weight to threshold on</td></tr>
+          <tr><td>a supervised classifier</td><td>higher accuracy when labels exist</td><td>labels almost never exist, and the training signal is where outcome leakage enters</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Folding missing into disagreement. Missingness is a third outcome with its own m and u;
+        collapsing it pushes true matches below the threshold, which looks exactly like
+        under-linkage and gets "fixed" by moving the wrong knob.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not accept or reject a pair — §3.3 owns the threshold. Never include an
+        outcome-flagged column as a comparison field, even when it would help.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://moj-analytical-services.github.io/splink/topic_guides/theory/fellegi_sunter.html">splink — the Fellegi–Sunter model</a>
+          <a href="https://moj-analytical-services.github.io/splink/">splink documentation</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/link_score.nf.test</code></pre>
+        <p>A fixture pair agreeing on everything but a missing field scores above one disagreeing
+        on that field — the three-way handling is observable in the weight.</p></div>
+    </li>
+
+    <li class="step" id="s3-3">
+      <h3><span class="n">§3.3</span><span>Threshold into links, and emit the match-weight histogram</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>The histogram is a mixture of two distributions, and the overlap region is the only
+        honest picture of what a threshold choice costs. It is emitted unconditionally because the
+        run that most needs it is the run nobody thought to ask for it.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   link/scores.parquet
+OUT  link/links.parquet        (person_id, cohort_id, [source_row_id])
+     link/match_histogram.png  both thresholds marked
+     link/link_report.json     { n_in, n_persons, n_clerical, collapse_ratio }
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>weight &gt;= match_threshold          -&gt; link
+clerical_threshold &lt;= w &lt; match    -&gt; CLERICAL review band, reported not linked
+weight &lt;  clerical_threshold       -&gt; distinct
+
+<span class="c"># link_report.json</span>
+{ "n_in": 1240, "n_persons": 1105, "collapse_ratio": 0.891,
+  "n_clerical": 37 }   <span class="c"># collapse_ratio far from 1.0 is the alarm</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>match_threshold</code></td><td><code>12.0</code></td><td>match weight</td><td>above it, two records are one person; lowering it over-links</td><td>config</td></tr>
+          <tr><td><code>clerical_threshold</code></td><td><code>6.0</code></td><td>match weight</td><td>the review band; pairs here are reported, never auto-linked</td><td>config</td></tr>
+          <tr><td><code>max_collapse_ratio_drop</code></td><td><code>0.5</code></td><td>0.0..1.0</td><td>fails the run when linkage collapses more than half the records</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>Resolver</code> — <code>resolve([ScoredPair]) -&gt; [PersonCluster]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>connected components</td><td>simplest clustering; what splink does by default</td><td>one bad edge chains two people into one cluster transitively</td></tr>
+          <tr><td>hierarchical / star clustering</td><td>resists transitive chaining</td><td>a second parameter, and clusters stop being reproducible from links alone</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Tuning the threshold until N looks right. N is the thing being measured; using it as the
+        target makes the linkage unfalsifiable. Tune on the clerical band's contents, which are
+        readable, and let N land where it lands.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not auto-resolve the clerical band. Never suppress the histogram when the run looks
+        clean. Do not let a threshold be chosen by any statistic computed on the outcome.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://moj-analytical-services.github.io/splink/">splink — thresholds and clustering</a>
+          <a href="https://multiqc.info/docs/">MultiQC — custom content</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test_full,docker --stop_after link
+test -s results/link/match_histogram.png
+jq -e '.collapse_ratio &gt; 0.5' results/link/link_report.json</code></pre>
+        <p>The histogram exists and both thresholds are drawn on it.</p></div>
+    </li>
+  </ol>
+</section>
+<section id="s4">
+  <h2><span class="n">§4</span><span>Propose — the matcher and its evidence channels</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://athena.ohdsi.org/">ATHENA vocabularies</a>
+    <a href="https://ohdsi.github.io/TheBookOfOhdsi/StandardizedVocabularies.html">Book of OHDSI — vocabularies</a>
+    <a href="https://ohdsi.github.io/Usagi/">Usagi</a>
+    <a href="https://ucum.org/ucum">UCUM</a>
+  </div>
+
+  <p class="lead">This is the intellectual core, and its defining property is negative: the
+  pipeline <em>never decides a mapping</em>. It emits a reconciliation ledger of ranked proposals,
+  each carrying its evidence vector and the one plot that would confirm or kill it.</p>
+
+  <ol class="steps">
+    <li class="step" id="s4-1">
+      <h3><span class="n">§4.1</span><span>Generate candidate concepts from the pinned vocabulary</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Scoring every column against every concept is intractable and pointless. Candidate
+        generation bounds the work and, like blocking in §3.1, sets a recall ceiling that no later
+        scoring can lift — so what it excludes must be recorded.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   profiles/*.json + the concept pack + the pinned ATHENA release
+OUT  propose/candidates.parquet (cohort_id, dataset_id, column,
+                                 variable, concept_id, generator_id)
+SIDE none; a column with zero candidates is emitted with a null concept_id</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># assets/packs/&lt;name&gt;.yaml — the pack IS the target variable set</span>
+pack: oncology-ici
+version: 1.2.0
+vocabulary: athena-2026-08          <span class="c"># pinned release; hashed</span>
+variables:
+  - name: ecog
+    domain: observation
+    concept_id: 4265453
+    type: ordinal
+    domain_values: [0, 1, 2, 3, 4]
+  - name: os
+    domain: derived
+    derivation: survival_time
+    unit: day
+    outcome: true                   <span class="c"># excluded from EVERY channel (§4.2)</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>max_candidates_per_column</code></td><td><code>20</code></td><td>1..500</td><td>the recall ceiling; excluded candidates are counted in the ledger</td><td>config</td></tr>
+          <tr><td><code>candidate_generators</code></td><td><code>[name_ngram, value_set, unit]</code></td><td>enum list</td><td>which cheap generators propose candidates at all</td><td>config</td></tr>
+          <tr><td><code>vocabulary_release</code></td><td>—</td><td>release id</td><td>pins ATHENA; a change invalidates every confirmed ledger row</td><td>pack, required</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>CandidateGenerator</code> — <code>generate(ColumnProfile, Pack) -&gt; [Candidate]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>embedding retrieval over concept names</td><td>catches synonyms and translations no n-gram will</td><td>a model container, and a recall ceiling nobody can inspect</td></tr>
+          <tr><td>full cross product</td><td>no recall ceiling at all</td><td>quadratic in concepts; unusable against a full ATHENA release</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Generating candidates from the concept's <em>name</em> alone. Clinical column names are
+        institution-local (<code>VAR_0114</code>) and the value set is often the only signal
+        present — a generator list without <code>value_set</code> silently loses those columns.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not score or rank — §4.2 owns that. Never generate a candidate for a variable the
+        pack marks <code>outcome: true</code>. Do not fall back to an unpinned vocabulary.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ohdsi.github.io/TheBookOfOhdsi/StandardizedVocabularies.html">Book of OHDSI — standardized vocabularies</a>
+          <a href="https://athena.ohdsi.org/">ATHENA</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker --stop_after propose
+duckdb -c "select count(*) from 'results/propose/candidates.parquet'
+           where variable in (select name from pack where outcome)"</code></pre>
+        <p>That count is zero: no outcome variable ever receives a candidate.</p></div>
+    </li>
+
+    <li class="step" id="s4-2">
+      <h3><span class="n">§4.2</span><span>Score each candidate on six independent evidence channels</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>One score cannot be argued with; six can. Each channel fails differently, so a
+        disagreement between them is the signal a human reviewer at §5 actually needs — and
+        reporting them separately is what makes the ledger refereeable rather than oracular.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   propose/candidates.parquet + profiles/*.json + pack + vocabulary
+OUT  propose/evidence.parquet (candidate_key, channel, score, detail)
+     propose/confirmation_plots/&lt;candidate_key&gt;.png
+SIDE none — a pure function; this purity is what §10.1 tests</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <div class="tw"><table>
+          <thead><tr><th>channel</th><th>signal</th><th>the failure it alone catches</th></tr></thead>
+          <tbody>
+          <tr><td><code>name_similarity</code></td><td>Jaro-Winkler over normalised column names</td><td>nothing the others catch — it is the weakest and the most trusted</td></tr>
+          <tr><td><code>type_agreement</code></td><td>inferred type vs the concept's expected type</td><td>an ID column read as a measurement</td></tr>
+          <tr><td><code>cardinality</code></td><td>unique-count ratio vs expected domain size</td><td>a categorical stored as continuous</td></tr>
+          <tr><td><code>value_overlap</code></td><td>Jaccard of the unique-value set vs the concept's ATHENA value set</td><td>a correctly-named column holding a different coding system</td></tr>
+          <tr><td><code>distribution_distance</code></td><td>Wasserstein vs confirmed columns for the same concept elsewhere</td><td>a scale flip that leaves name, type and cardinality intact</td></tr>
+          <tr><td><code>unit_plausibility</code></td><td>does the range fit the candidate unit, or fit after ×30.4 / ×365.25</td><td>months recorded where days are expected — invisible to all five others</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>channel_weights</code></td><td><code>{name:0.15, type:0.15, card:0.1, value:0.3, dist:0.15, unit:0.15}</code></td><td>sums to 1</td><td>the rank order of proposals; never their acceptance</td><td>config</td></tr>
+          <tr><td><code>enabled_channels</code></td><td>all six</td><td>enum list</td><td>disabling one is recorded in the ledger, not silent</td><td>config</td></tr>
+          <tr><td><code>unit_factor_candidates</code></td><td><code>[1, 30.4375, 365.25, 0.001, 1000]</code></td><td>float list</td><td>the conversions unit plausibility will try</td><td>config</td></tr>
+          <tr><td><code>emit_confirmation_plots</code></td><td><code>true</code></td><td>boolean</td><td>emits the one plot that would kill each proposal</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>EvidenceChannel</code> — <code>score(ColumnProfile, Candidate) -&gt; (float, Detail)</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>a learned matcher (Ditto-style)</td><td>higher top-1 accuracy on benchmark corpora</td><td>no per-channel evidence to referee, and the training signal is where outcome leakage enters unobserved</td></tr>
+          <tr><td>a seventh channel: schema context</td><td>neighbouring columns disambiguate a bare code column</td><td>couples columns, so the permutation test in §10.1 must widen its scope</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Six restatements of "the names look alike". Cardinality and value overlap are instance
+        evidence and survive a full rename; name similarity does not survive a translation. If two
+        channels move together under every perturbation, you have five.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Never let any channel read a column the pack marks <code>outcome: true</code>, directly
+        or through a correlation. Do not accept a proposal. Do not tune weights against a
+        downstream model's performance.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ucum.org/ucum">UCUM — unit grammar</a>
+          <a href="https://ohdsi.github.io/Usagi/">Usagi — what a mapping proposal carries</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/propose_channels.nf.test</code></pre>
+        <p>A fixture column of months against a day-unit concept is ranked down by
+        <code>unit_plausibility</code> alone while the other five score it high.</p></div>
+    </li>
+
+    <li class="step" id="s4-3">
+      <h3><span class="n">§4.3</span><span>Write the ranked proposal ledger, deterministically</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>The ledger is what the invariant is tested on. Byte-level determinism given identical
+        inputs is not tidiness — it is the precondition for the permutation test in §10.1 meaning
+        anything at all.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   propose/evidence.parquet
+OUT  ledger.proposed.yaml    ordered, stable, hashable
+SIDE none; identical inputs MUST yield an identical sha256</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># ledger.proposed.yaml — sorted by (cohort_id, dataset_id, column, -total)</span>
+- cohort_id: COHORT_A
+  dataset_id: clinical
+  column: "PDL1_PCT"
+  proposals:
+    - variable: pdl1_tps
+      concept_id: 4245277
+      total: 0.87
+      evidence: {name: 0.62, type: 1.0, card: 0.9,
+                 value: 0.95, dist: 0.71, unit: 1.0}
+      confirmation_plot: propose/confirmation_plots/a.clin.PDL1_PCT.png
+      excluded_candidates: 3        <span class="c"># the recall ceiling, made visible</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>ledger_top_k</code></td><td><code>5</code></td><td>1..50</td><td>proposals written per column; the rest are counted, not listed</td><td>config</td></tr>
+          <tr><td><code>ledger_float_precision</code></td><td><code>4</code></td><td>2..8</td><td>rounding, so a float's last bit cannot change the hash</td><td>config</td></tr>
+          <tr><td><code>permute_outcome_seed</code></td><td><code>null</code></td><td>int or range</td><td>test-only: permutes the outcome to falsify the invariant</td><td>CLI</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>LedgerWriter</code> — <code>write([Proposal]) -&gt; bytes</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>JSON Lines</td><td>streams; diffs line-wise in review</td><td>far less readable for the human at the §5 gate, who is the actual audience</td></tr>
+          <tr><td>a database table</td><td>queryable across runs</td><td>not hashable, not diffable, not reviewable in a pull request</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Non-determinism from map iteration order or unrounded floats. It makes every
+        permutation hash differ, so the invariant test reports a leak on every run and gets
+        disabled — the failure mode is a switched-off gate, not a red build.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not write a timestamp, hostname, absolute path or run id into this file. Never
+        promote a top proposal to confirmed — that is §5 and it requires a human.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://json-schema.org/understanding-json-schema">JSON Schema — for the ledger's schema</a>
+          <a href="https://www.nf-test.com/docs/assertions/assertions/">nf-test assertions</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>for s in 1 2 3; do nextflow run . -profile test,docker \
+  --permute_outcome_seed $s --stop_after propose; \
+  sha256sum results/ledger.proposed.yaml; done | sort -u | wc -l</code></pre>
+        <p>That prints <code>1</code>. Three permutations, one hash.</p></div>
+    </li>
+  </ol>
+</section>
+
+<section id="s5">
+  <h2><span class="n">§5</span><span>Confirm — the ledger as a human gate</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://ohdsi.github.io/Usagi/">Usagi — the GUI equivalent</a>
+    <a href="https://www.nextflow.io/docs/latest/process.html">Nextflow — process inputs</a>
+    <a href="https://json-schema.org/understanding-json-schema">JSON Schema</a>
+  </div>
+
+  <p class="lead">A Nextflow process cannot prompt. That constraint is a gift: it forces the human
+  gate to be a <em>file</em>, which makes the decision auditable, diffable in review, and the rerun
+  deterministic. A GUI would have made it none of those.</p>
+
+  <ol class="steps">
+    <li class="step" id="s5-1">
+      <h3><span class="n">§5.1</span><span>Accept a confirmed ledger and refuse to guess when it is absent</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>The gap between proposed and confirmed is where the human judgement lives. A pipeline
+        that fills that gap with its own top-ranked guess has quietly deleted the only review step
+        in the design while still emitting a file called a ledger.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   --confirmed_ledger ledger.confirmed.yaml   (required to pass §5)
+     ledger.proposed.yaml                        (for the staleness check)
+OUT  ch_confirmed : [ cohort_id, dataset_id, column, variable, concept_id, rule_id ]
+SIDE exits non-zero, with the diff, when the confirmed ledger is stale</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># ledger.confirmed.yaml — proposed + a decision + who + why</span>
+- cohort_id: COHORT_A
+  dataset_id: clinical
+  column: "PDL1_PCT"
+  decision: accept              <span class="c"># accept | reject | remap | defer</span>
+  variable: pdl1_tps
+  concept_id: 4245277
+  unit_in: "%"                  <span class="c"># the resolved unit; §2.2 only ranked them</span>
+  confirmed_by: "a.reviewer"
+  rationale: "value set 0-100, LOINC 83052-1 matches assay note"
+  proposed_hash: "sha256:9f21…"  <span class="c"># staleness guard</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>confirmed_ledger</code></td><td><code>null</code></td><td>path</td><td>the human gate; null stops the run after §4 with instructions</td><td>CLI</td></tr>
+          <tr><td><code>require_rationale</code></td><td><code>true</code></td><td>boolean</td><td>an accept with no rationale is rejected at parse time</td><td>config</td></tr>
+          <tr><td><code>allow_stale_ledger</code></td><td><code>false</code></td><td>boolean</td><td>escape hatch when a pack bump did not change proposals; logged loudly</td><td>CLI</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>ConfirmationSource</code> — <code>confirm([Proposal]) -&gt; [Decision]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>Usagi export</td><td>a real reviewer UI with vocabulary search built in</td><td>an import shim, and Usagi's model has no cohort dimension</td></tr>
+          <tr><td>auto-accept above a score</td><td>unblocks CI and demos</td><td>deletes the gate; permitted ONLY under <code>-profile test</code>, never in a release run</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Matching confirmed rows to proposals by row index. A pack bump reorders proposals and
+        the ledger silently re-points every decision at a different column. Match on
+        <code>(cohort_id, dataset_id, column)</code> and verify <code>proposed_hash</code>.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not auto-confirm outside <code>-profile test</code>. Never proceed past a stale
+        <code>proposed_hash</code> without <code>--allow_stale_ledger</code>. Do not edit the
+        proposed ledger in place.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ohdsi.github.io/Usagi/">Usagi — mapping review</a>
+          <a href="https://www.nextflow.io/docs/latest/process.html">Nextflow — process</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker            <span class="c"># no ledger: stops after propose</span>
+nextflow run . -profile test,docker --confirmed_ledger assets/test_ledger.yaml</code></pre>
+        <p>Without a ledger the run stops cleanly and prints the path to write; with one it proceeds.</p></div>
+    </li>
+
+    <li class="step" id="s5-2">
+      <h3><span class="n">§5.2</span><span>Compile decisions into versioned, addressable mapping rules</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Provenance requires that every emitted cell name the rule that produced it. Rules must
+        therefore be first-class, addressable and versioned — otherwise <code>--audit</code> can
+        report a value's origin but not the reasoning that transformed it.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   ch_confirmed
+OUT  rules/ruleset.json   [ {rule_id, rule_version, kind, from, to, params} ]
+SIDE none; rule_id is a content hash, so an unchanged rule keeps its id</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>{ "rule_id": "R-0142",                 <span class="c"># stable: hash of (kind, from, to, params)</span>
+  "rule_version": "1.2.0",             <span class="c"># the PACK version that produced it</span>
+  "kind": "column_map|value_map|unit_convert|derive",
+  "from": {"cohort_id":"COHORT_A","dataset_id":"clinical","column":"PDL1_PCT"},
+  "to":   {"variable":"pdl1_tps","concept_id":4245277},
+  "params": {"unit_in":"%","unit_out":"%","factor":1.0} }</code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>rule_id_prefix</code></td><td><code>R-</code></td><td>string</td><td>cosmetic; the id's stability comes from the content hash</td><td>config</td></tr>
+          <tr><td><code>fail_on_rule_collision</code></td><td><code>true</code></td><td>boolean</td><td>two rules writing the same target cell is a defect, not a merge</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>RuleCompiler</code> — <code>compile([Decision]) -&gt; [Rule]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>SQL views per cohort</td><td>readable by anyone who knows SQL; no rule engine</td><td>provenance stops being per-cell and becomes per-query</td></tr>
+          <tr><td>sequential rule id</td><td>friendlier to read in a report</td><td>an unchanged rule gets a new id on reorder, so diffs become noise</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Deriving <code>rule_id</code> from position or time. Provenance rows then point at ids
+        that shift between runs, and an audit against an older output silently resolves to the
+        wrong rule — which is worse than failing to resolve.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not apply any rule — §6 does that. Never merge two rules that write the same target
+        cell; fail and name both.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ohdsi.github.io/CommonDataModel/dataModelConventions.html">OMOP CDM conventions</a>
+          <a href="https://json-schema.org/understanding-json-schema">JSON Schema</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/rules_stable.nf.test</code></pre>
+        <p>Reordering the confirmed ledger leaves every <code>rule_id</code> unchanged.</p></div>
+    </li>
+  </ol>
+</section>
+<section id="s6">
+  <h2><span class="n">§6</span><span>Map — concepts, units, value vocabularies</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://ohdsi.github.io/CommonDataModel/cdm54.html">OMOP CDM v5.4</a>
+    <a href="https://ohdsi.github.io/CommonDataModel/dataModelConventions.html">CDM conventions</a>
+    <a href="https://ucum.org/ucum">UCUM</a>
+    <a href="https://www.nlm.nih.gov/research/umls/rxnorm/index.html">RxNorm</a>
+  </div>
+
+  <p class="lead">Pure application. Every inference happened in §4 and every decision in §5, so a
+  surprise here — a value that will not map, a unit with no factor — is a bug in the ledger, not a
+  case to handle cleverly. This stage's job is to be boring and to fail loudly.</p>
+
+  <ol class="steps">
+    <li class="step" id="s6-1">
+      <h3><span class="n">§6.1</span><span>Apply concept mappings into OMOP rows</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>A source code is a string in someone's database; a standard concept is the only thing
+        the CDM lets you query on. Making that translation explicit and rule-addressed is what
+        turns a pile of cohorts into something a network study can read.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   linked cohort tables + rules/ruleset.json + pinned vocabulary
+OUT  mapped/&lt;domain&gt;.parquet   one row per (person, concept, datetime)
+     mapped/_unmapped.parquet   every source value with no standard concept
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># Both ids are kept. source_concept_id is what makes the map reversible.</span>
+{ "person_id": int, "cohort_id": str,
+  "&lt;domain&gt;_concept_id": int,          <span class="c"># STANDARD concept</span>
+  "&lt;domain&gt;_source_value": str,        <span class="c"># verbatim source string</span>
+  "&lt;domain&gt;_source_concept_id": int,   <span class="c"># non-standard, pre-translation</span>
+  "&lt;domain&gt;_datetime": timestamp,
+  "rule_id": str, "rule_version": str }</code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>cdm_version</code></td><td><code>5.4</code></td><td><code>5.3</code>|<code>5.4</code></td><td>the target table shapes</td><td>config</td></tr>
+          <tr><td><code>cdm_domains</code></td><td><code>[person, condition_occurrence, drug_exposure, measurement, observation]</code></td><td>enum list</td><td>the five-table subset; the pipeline never claims full conformance</td><td>config</td></tr>
+          <tr><td><code>max_unmapped_frac</code></td><td><code>0.2</code></td><td>0.0..1.0</td><td>above this fraction of values unmapped, the run fails</td><td>config</td></tr>
+          <tr><td><code>keep_source_concept</code></td><td><code>true</code></td><td>boolean</td><td>retains the pre-translation concept; turning it off breaks <code>--audit</code></td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>ConceptMapper</code> — <code>map(value, Rule, Vocabulary) -&gt; [OmopRow]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>OHDSI ETL-Synthea style SQL</td><td>battle-tested; runs inside the warehouse</td><td>rule provenance becomes per-query rather than per-cell</td></tr>
+          <tr><td>emit source concepts only</td><td>lossless; defers every mapping decision</td><td>output is no longer queryable as OMOP, which is the whole point</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Dropping <code>source_concept_id</code> once the standard concept is found. The
+        source-to-standard map is many-to-one, so without it the distinction the source cohort
+        recorded deliberately is unrecoverable and <code>--audit</code> cannot walk back.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not invent a concept id for an unmapped value — write it to
+        <code>_unmapped.parquet</code>. Never consult an unpinned vocabulary. Do not derive any
+        endpoint; that is §7.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ohdsi.github.io/CommonDataModel/cdm54.html">OMOP CDM v5.4 tables</a>
+          <a href="https://ohdsi.github.io/TheBookOfOhdsi/StandardizedVocabularies.html">standard vs source concepts</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker --stop_after map
+duckdb -c "select count(*) from 'results/mapped/measurement.parquet'
+           where measurement_source_concept_id is null"</code></pre>
+        <p>That count is zero, and <code>_unmapped.parquet</code> exists even when empty.</p></div>
+    </li>
+
+    <li class="step" id="s6-2">
+      <h3><span class="n">§6.2</span><span>Convert units through UCUM, refusing ambiguity</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>A unit error is the failure most likely to survive every downstream check: the values
+        look plausible, the type is right, and only a distribution comparison against another
+        cohort exposes it. Refusing an ambiguous conversion is cheaper than detecting one.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   mapped/&lt;domain&gt;.parquet + rules (unit_in, unit_out) + pack ranges
+OUT  same rows, value_as_number converted; unit_concept_id set
+     qc/unit_conversions.json  [{rule_id, from, to, factor, n_rows}]
+SIDE fails the run on an ambiguous or missing conversion factor</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>convert(v, "mg/dL", "mmol/L", analyte) -&gt; v * factor(analyte)
+<span class="c"># There is NO universal mg/dL -&gt; mmol/L factor: it is molar-mass</span>
+<span class="c"># specific. A conversion without an analyte is an error, not a default.</span>
+
+post-condition: pack.plausible_range contains p1..p99 of the result
+                else -&gt; qc flag `implausible_after_conversion`, run fails</code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>unit_conversion_table</code></td><td><code>assets/ucum_factors.yaml</code></td><td>path</td><td>analyte-aware factors; the only source of conversions</td><td>config</td></tr>
+          <tr><td><code>fail_on_implausible_range</code></td><td><code>true</code></td><td>boolean</td><td>a converted distribution outside the pack range stops the run</td><td>config</td></tr>
+          <tr><td><code>plausible_range_quantiles</code></td><td><code>[0.01, 0.99]</code></td><td>two floats</td><td>which quantiles the range check uses, so outliers alone cannot fail it</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>UnitConverter</code> — <code>convert(value, from, to, analyte) -&gt; value</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>a UCUM library</td><td>full grammar; arbitrary compound units</td><td>still cannot supply analyte-specific molar factors, which is the hard half</td></tr>
+          <tr><td>store both raw and converted</td><td>nothing is ever lost</td><td>doubles the measurement table and moves the ambiguity downstream</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Assuming a single factor per unit pair. mg/dL to mmol/L differs for glucose and
+        creatinine, so an analyte-blind table produces values that are plausible, wrong, and
+        indistinguishable from real biological variation.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not guess a unit when <code>candidate_units</code> was empty. Never convert to a unit
+        the pack does not declare. Do not silence the range check with a wider range.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ucum.org/ucum">UCUM specification</a>
+          <a href="https://ohdsi.github.io/CommonDataModel/cdm54.html">CDM — measurement.unit_concept_id</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/units.nf.test</code></pre>
+        <p>A creatinine column converted with the glucose factor trips
+        <code>implausible_after_conversion</code> and fails the run.</p></div>
+    </li>
+
+    <li class="step" id="s6-3">
+      <h3><span class="n">§6.3</span><span>Map value vocabularies, and show every collapse</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Mapping values is where distinctions die. Four source grades collapsing into two
+        canonical ones is sometimes correct and sometimes the destruction of the effect being
+        studied, and only a picture of the collapse lets anyone tell which.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   mapped rows with categorical values + value-map rules
+OUT  same rows, value_as_concept_id set
+     qc/value_collapse.json  [{rule_id, from:[str], to:str, n_rows}]
+     qc/alluvial_&lt;variable&gt;.png   raw value -&gt; canonical concept
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># A collapse is recorded with its FAN-IN, always.</span>
+{ "rule_id": "R-0207", "variable": "ecog",
+  "from": ["0","1"], "to": "0-1", "n_rows": 812,
+  "fan_in": 2 }        <span class="c"># fan_in &gt; 1 is a lost distinction, by definition</span>
+
+<span class="c"># qc/alluvial_ecog.png — every source value on the left, canonical on</span>
+<span class="c"># the right, ribbon width = n_rows. Emitted unconditionally.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>max_fan_in_warn</code></td><td><code>3</code></td><td>1..20</td><td>a collapse wider than this is flagged in the QC report</td><td>config</td></tr>
+          <tr><td><code>emit_alluvial</code></td><td><code>true</code></td><td>boolean</td><td>the plot that makes a collapse visible at all</td><td>config</td></tr>
+          <tr><td><code>unmapped_value_policy</code></td><td><code>manifest</code></td><td><code>manifest</code>|<code>fail</code></td><td>whether an unmappable value stops the run or is recorded</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>ValueMapper</code> — <code>mapValue(str, Rule) -&gt; concept_id?</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>keep the finest common grain</td><td>never collapses; downstream chooses</td><td>fails when two cohorts' grains do not nest, which is the usual case</td></tr>
+          <tr><td>emit both raw and canonical columns</td><td>the collapse stays reversible in the output</td><td>widens every domain table and pushes the decision to every consumer</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Treating best response as a value to map. It is an endpoint derived from a scan sequence
+        under a criteria version (§7.3); mapping the source's stated string silently imports
+        whichever criteria that cohort used, unrecorded.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not collapse a value set without writing its <code>fan_in</code>. Never suppress the
+        alluvial plot because the collapse looked obvious.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ohdsi.github.io/TheBookOfOhdsi/StandardizedVocabularies.html">concept relationships</a>
+          <a href="https://multiqc.info/docs/">MultiQC — custom plots</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker --stop_after map
+jq -e '[.[] | select(.fan_in &gt; 1)] | length &gt;= 0' results/qc/value_collapse.json</code></pre>
+        <p>Every collapse in the fixture appears with its fan-in and an alluvial plot exists.</p></div>
+    </li>
+  </ol>
+</section>
+
+<section id="s7">
+  <h2><span class="n">§7</span><span>Derive endpoints — time, event, response</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://database.ich.org/sites/default/files/E9-R1_Step4_Guideline_2019_1203.pdf">ICH E9(R1) estimands</a>
+    <a href="https://lifelines.readthedocs.io/en/latest/">lifelines</a>
+    <a href="https://scikit-survival.readthedocs.io/en/stable/">scikit-survival</a>
+    <a href="https://docs.python.org/3/library/datetime.html">Python datetime</a>
+  </div>
+
+  <p class="lead">Where the inversion bugs live. An endpoint is not a column to copy — it is
+  derived under a declared estimand, and the pack is where that estimand lives. Every convention
+  the pack does not state is a convention this stage would have to guess.</p>
+
+  <ol class="steps">
+    <li class="step" id="s7-1">
+      <h3><span class="n">§7.1</span><span>Normalise dates, keeping partial dates partial</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Clinical dates arrive as year, year-month and full dates in one column. Silently
+        completing a partial date to the first of the month invents precision that then propagates
+        into every interval, and nothing downstream can see that it was invented.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   mapped rows with date-typed columns
+OUT  same rows + (&lt;col&gt;_date, &lt;col&gt;_precision) where precision ∈
+     {day, month, year}; the imputed date is ALWAYS accompanied by it
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>"2021-03-14" -&gt; (2021-03-14, day)
+"2021-03"    -&gt; (2021-03-15, month)   <span class="c"># mid-interval, not the 1st</span>
+"2021"       -&gt; (2021-07-01, year)    <span class="c"># mid-interval</span>
+
+<span class="c"># Mid-interval, because month-start systematically biases every</span>
+<span class="c"># interval in one direction; mid-interval biases variance instead.</span>
+<span class="c"># All timestamps are stored naive UTC dates — no local time, ever.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>partial_date_policy</code></td><td><code>mid_interval</code></td><td><code>mid_interval</code>|<code>start</code>|<code>reject</code></td><td>how a year- or month-only date becomes a date</td><td>config</td></tr>
+          <tr><td><code>min_date_precision</code></td><td><code>month</code></td><td><code>day</code>|<code>month</code>|<code>year</code></td><td>coarser than this and the row is excluded from derivation</td><td>config</td></tr>
+          <tr><td><code>reject_future_dates</code></td><td><code>true</code></td><td>boolean</td><td>a date after the run date is a data error, not a censoring time</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>DateNormaliser</code> — <code>parse(str) -&gt; (date, Precision)</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>interval-censored derivation</td><td>statistically correct: a month-only date IS an interval</td><td>every downstream model must accept interval censoring; most do not</td></tr>
+          <tr><td>reject partial dates outright</td><td>no invented precision at all</td><td>discards whole cohorts — registry data is routinely month-only</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Dropping the precision column once a date exists. Precision is what lets §8 report how
+        much of a cohort's survival time is imputed, and without it a month-only cohort is
+        indistinguishable from a day-precise one in every plot.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not apply a timezone. Never impute a date without emitting its precision. Do not
+        infer a missing date from another row.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://docs.python.org/3/library/datetime.html">Python datetime</a>
+          <a href="https://pandas.pydata.org/docs/reference/api/pandas.to_datetime.html">pandas.to_datetime</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/dates.nf.test</code></pre>
+        <p><code>"2021-03"</code> yields <code>(2021-03-15, month)</code>, and no row carries a
+        date without a precision.</p></div>
+    </li>
+
+    <li class="step" id="s7-2">
+      <h3><span class="n">§7.2</span><span>Derive time and event together, under the pack's estimand</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Time and event are one derivation, not two columns. Splitting them is how a cohort ends
+        up with an event flag from one convention and a duration from another, which no schema
+        check catches because both columns are individually valid.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   normalised dates + pack variables with domain: derived
+OUT  derived/endpoints.parquet
+     (person_id, cohort_id, endpoint, time_days, event, censor_reason,
+      time_zero_rule, precision, criteria_version)
+     qc/km_&lt;endpoint&gt;_by_cohort.png
+SIDE fails when a survival curve is non-monotonic</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>time_days = (event_or_censor_date - time_zero_date).days
+event     = 1 if the pack's event condition holds else 0
+
+<span class="c"># Source event codings are DECLARED, never inferred:</span>
+event_coding: {censored: 1, event: 2}   <span class="c"># or {0,1} — per cohort</span>
+
+<span class="c"># Post-condition, checked: the KM curve is non-increasing.</span>
+<span class="c"># A RISING curve is an inverted event coding, and it is the only</span>
+<span class="c"># cheap detector — {1,2} is a plausible 0/1-shifted flag, so the</span>
+<span class="c"># unique-value set alone cannot tell the two codings apart.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>time_zero</code></td><td><code>treatment_start</code></td><td><code>treatment_start</code>|<code>diagnosis</code>|<code>enrolment</code></td><td>the design decision immortal-time bias hides in</td><td>pack</td></tr>
+          <tr><td><code>event_coding</code></td><td><code>{censored: 0, event: 1}</code></td><td>map</td><td>per-cohort declaration; never inferred from the value set</td><td>samplesheet</td></tr>
+          <tr><td><code>competing_risk_policy</code></td><td><code>separate</code></td><td><code>separate</code>|<code>censor</code></td><td>whether death from another cause is a competing event or censoring</td><td>pack</td></tr>
+          <tr><td><code>fail_on_rising_km</code></td><td><code>true</code></td><td>boolean</td><td>a non-monotonic survival curve stops the run</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>EndpointDeriver</code> — <code>derive(person, Pack) -&gt; [Endpoint]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>copy a pre-derived OS column</td><td>trivial; the cohort already computed it</td><td>imports an undeclared estimand — its time zero is unknown and unrecorded</td></tr>
+          <tr><td>emit a target-trial clone table</td><td>makes time zero and eligibility explicit per Hernán &amp; Robins</td><td>a second output model, and the pack must declare eligibility too</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Assuming censoring is coded 0/1. Cohorts use 1/2 at least as often, and
+        <code>{1,2}</code> is a perfectly plausible shifted flag — so the coding must be declared
+        per cohort and the KM curve is the only thing that catches a wrong declaration.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not infer <code>event_coding</code> from the data. Never let time zero follow an
+        eligibility-defining event — that manufactures immortal time. Do not censor a competing
+        event silently.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://database.ich.org/sites/default/files/E9-R1_Step4_Guideline_2019_1203.pdf">ICH E9(R1) — estimand attributes</a>
+          <a href="https://lifelines.readthedocs.io/en/latest/">lifelines — KM and competing risks</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/endpoints_inverted.nf.test
+nextflow run . -profile test,docker --stop_after derive</code></pre>
+        <p>A fixture cohort with inverted event coding fails with a rising-curve message naming it.</p></div>
+    </li>
+
+    <li class="step" id="s7-3">
+      <h3><span class="n">§7.3</span><span>Derive best response, recording the criteria version</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>The same scan sequence yields a different best response under RECIST 1.1 and iRECIST.
+        Two cohorts scored under different criteria are not the same variable, and the only place
+        that fact can be recorded is here.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   per-person lesion/assessment rows + pack derivation spec
+OUT  derived/endpoints.parquet rows with endpoint = best_response
+     (value, criteria_version, n_assessments, confirmed)
+SIDE none; a cohort with no assessment rows yields no rows, not a null</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>best_response ∈ {CR, PR, SD, PD, NE}
+criteria_version ∈ {recist_1_1, irecist, who, custom:&lt;id&gt;}
+
+<span class="c"># Under iRECIST, progression requires CONFIRMATION at a later scan;</span>
+<span class="c"># under RECIST 1.1 it does not. `confirmed` records which rule ran.</span>
+<span class="c"># A cohort supplying a pre-scored response gets</span>
+<span class="c"># criteria_version = "custom:source" and is NEVER pooled silently.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>response_criteria</code></td><td><code>null</code></td><td>enum</td><td>per-cohort; null means the cohort supplies its own scored response</td><td>samplesheet</td></tr>
+          <tr><td><code>require_confirmation</code></td><td><code>false</code></td><td>boolean</td><td>whether PD needs a confirmatory later assessment</td><td>pack</td></tr>
+          <tr><td><code>pool_across_criteria</code></td><td><code>false</code></td><td>boolean</td><td>pooling different criteria into one variable — off, and loud when on</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>ResponseDeriver</code> — <code>bestResponse([Assessment], Criteria) -&gt; Response</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>accept the source's best response only</td><td>no lesion-level data needed; most cohorts have none</td><td>criteria become unknown per cohort, so cross-cohort pooling is unjustifiable</td></tr>
+          <tr><td>derive under both criteria, emit both</td><td>makes the criteria effect measurable</td><td>doubles the response rows; consumers must pick, and most will pick wrongly</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Pooling <code>custom:source</code> responses with derived ones. Pseudoprogression means
+        an iRECIST-scored cohort has systematically fewer PD calls, so pooling shifts the response
+        rate by a mechanism that looks exactly like a treatment effect.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Never emit a response without <code>criteria_version</code>. Do not default an unscored
+        cohort to RECIST 1.1. Do not pool criteria unless explicitly asked.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://pubmed.ncbi.nlm.nih.gov/19097774/">RECIST 1.1 (Eisenhauer 2009)</a>
+          <a href="https://pubmed.ncbi.nlm.nih.gov/28271869/">iRECIST (Seymour 2017)</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/response_criteria.nf.test</code></pre>
+        <p>One assessment sequence derives PD under RECIST 1.1 and SD under iRECIST, and both rows
+        carry their criteria version.</p></div>
+    </li>
+  </ol>
+</section>
+<section id="s8">
+  <h2><span class="n">§8</span><span>Coverage — the frontier and the missingness picture</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://ohdsi.github.io/TheBookOfOhdsi/DataQuality.html">Book of OHDSI — data quality</a>
+    <a href="https://github.com/OHDSI/DataQualityDashboard">DataQualityDashboard</a>
+    <a href="https://multiqc.info/docs/">MultiQC</a>
+    <a href="https://arrow.apache.org/docs/python/parquet.html">Arrow — Parquet</a>
+  </div>
+
+  <p class="lead">Harmonization has a price and this section is where it is quoted. More variables
+  means fewer cohorts that carry all of them; more cohorts means fewer shared variables. The
+  pipeline reports the frontier honestly and <em>never picks the operating point</em>.</p>
+
+  <ol class="steps">
+    <li class="step" id="s8-1">
+      <h3><span class="n">§8.1</span><span>Compute the coverage matrix and its Pareto frontier</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Every multi-cohort analysis silently chooses a variables-versus-cohorts trade-off.
+        Making the frontier an artifact turns that choice into a defensible decision rather than a
+        side effect of whichever subset happened to join cleanly.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   canonical rows + the pack's variable list
+OUT  coverage/matrix.parquet   (cohort_id, variable, n_persons, frac_present)
+     coverage/frontier.json    [{n_variables, n_cohorts, n_persons, variables}]
+     coverage/frontier.png
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># A point on the frontier: no other subset gives MORE cohorts at</span>
+<span class="c"># this variable count, or more variables at this cohort count.</span>
+{ "n_variables": 8, "n_cohorts": 5, "n_persons": 2140,
+  "variables": ["age","sex","ecog","stage","line","pdl1_tps","os","pfs"],
+  "dropped_cohorts": ["COHORT_D"] }
+
+<span class="c"># frac_present counts NON-MISSING among linked persons, so a cohort</span>
+<span class="c"># with the column and no values reads 0.0 — not absent (see §2.3).</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>coverage_min_frac</code></td><td><code>0.8</code></td><td>0.0..1.0</td><td>the fraction at which a cohort counts as carrying a variable</td><td>config</td></tr>
+          <tr><td><code>frontier_max_subsets</code></td><td><code>100000</code></td><td>10^3..10^7</td><td>enumeration cap; above it the search is greedy and says so</td><td>config</td></tr>
+          <tr><td><code>required_variables</code></td><td><code>[]</code></td><td>variable list</td><td>variables every frontier point must include (usually the outcome)</td><td>pack</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>FrontierSearch</code> — <code>frontier(matrix) -&gt; [Point]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>greedy forward selection</td><td>linear; scales past 30 variables</td><td>can miss the true frontier, so the output must be labelled approximate</td></tr>
+          <tr><td>ILP over the subset lattice</td><td>exact at larger scale than enumeration</td><td>a solver dependency for a plot most readers skim</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Counting a variable as covered when the column exists. Presence of a column and presence
+        of values are different facts, and conflating them produces a frontier that promises data
+        the imputation stage then has to invent.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not select an operating point — emit the frontier and stop. Never drop a cohort from
+        the matrix because it covers little; that is the finding.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://github.com/OHDSI/DataQualityDashboard">DataQualityDashboard — completeness checks</a>
+          <a href="https://arrow.apache.org/docs/python/parquet.html">Arrow — Parquet</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test_full,docker --stop_after coverage
+jq -e 'length &gt; 1' results/coverage/frontier.json</code></pre>
+        <p>The frontier has more than one point, and every point lists its dropped cohorts.</p></div>
+    </li>
+
+    <li class="step" id="s8-2">
+      <h3><span class="n">§8.2</span><span>Classify missingness as systematic or sporadic, per cohort</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>A cohort that never measured a variable and a cohort missing it for twelve patients are
+        different problems with different remedies. The distinction is invisible in a pooled
+        missingness rate and obvious in a cohort-by-variable heatmap.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   coverage/matrix.parquet
+OUT  coverage/missingness.parquet (cohort_id, variable, class, frac_missing)
+     coverage/missingness_heatmap.png
+SIDE none — this stage never imputes</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>class ∈ { systematic,   <span class="c"># frac_missing == 1.0 for this cohort</span>
+          near_systematic, <span class="c"># &gt;= systematic_threshold</span>
+          sporadic,     <span class="c"># scattered within the cohort</span>
+          complete }
+
+<span class="c"># Imputing a SYSTEMATIC variable inside a cohort with zero</span>
+<span class="c"># observations of it is pure between-cohort extrapolation wearing a</span>
+<span class="c"># within-cohort mask, and its uncertainty is understated by exactly</span>
+<span class="c"># the amount that matters. The class is emitted so a consumer cannot</span>
+<span class="c"># do that accidentally.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>systematic_threshold</code></td><td><code>0.95</code></td><td>0.5..1.0</td><td>above this missing fraction a variable is near-systematic for that cohort</td><td>config</td></tr>
+          <tr><td><code>emit_missingness_heatmap</code></td><td><code>true</code></td><td>boolean</td><td>the plot that separates the two classes by eye</td><td>config</td></tr>
+          <tr><td><code>min_cohort_n</code></td><td><code>20</code></td><td>1..10^5</td><td>below this, classification is reported as unreliable rather than asserted</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>MissingnessClassifier</code> — <code>classify(cohort, variable) -&gt; Class</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>impute here with multilevel MICE</td><td>one artifact, ready to model on</td><td>bakes an assumption into the canonical output that every consumer then inherits</td></tr>
+          <tr><td>test MCAR (Little's test)</td><td>an actual statistic rather than a threshold</td><td>the test is about the mechanism, not the pattern, and is badly underpowered at few cohorts</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Reporting one missingness rate per variable across cohorts. It averages a cohort with
+        100% missing and one with 0% into a plausible-looking 50%, which is exactly the number that
+        licenses the wrong imputation.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not impute anything. Never collapse the cohort dimension. Do not omit a cohort with
+        complete missingness from the heatmap — it is the clearest signal on it.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ohdsi.github.io/TheBookOfOhdsi/DataQuality.html">Book of OHDSI — completeness</a>
+          <a href="https://multiqc.info/docs/">MultiQC — heatmap module</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test_full,docker --stop_after coverage
+duckdb -c "select distinct class from 'results/coverage/missingness.parquet'"</code></pre>
+        <p>Both <code>systematic</code> and <code>sporadic</code> appear on the multi-cohort fixture.</p></div>
+    </li>
+
+    <li class="step" id="s8-3">
+      <h3><span class="n">§8.3</span><span>Emit the per-cohort standardized-difference forest</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Cohorts differ, and a difference large enough to be learned as a cohort effect will leak
+        batch into any downstream model. Reporting standardized differences per variable makes
+        transportability an inspectable property rather than an assumption.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   canonical rows + coverage matrix
+OUT  coverage/std_diff.parquet (variable, cohort_id, smd, ci_low, ci_high)
+     coverage/std_diff_forest.png
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>smd = (mean_cohort - mean_pooled) / pooled_sd          <span class="c"># continuous</span>
+    = (p_cohort - p_pooled) / sqrt(p_bar*(1-p_bar))    <span class="c"># binary</span>
+
+<span class="c"># |smd| &gt; 0.1 is the conventional imbalance flag. Outcome-flagged</span>
+<span class="c"># variables ARE included here — this is reporting, not a mapping</span>
+<span class="c"># decision, so §0's invariant does not bind it. That distinction</span>
+<span class="c"># is the reason §10.1 tests the PROPOSER, not the whole pipeline.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>smd_flag_threshold</code></td><td><code>0.1</code></td><td>0.0..2.0</td><td>the imbalance line drawn on the forest plot</td><td>config</td></tr>
+          <tr><td><code>smd_bootstrap_n</code></td><td><code>1000</code></td><td>0..10^5</td><td>bootstrap replicates for the interval; 0 emits a point estimate only</td><td>config</td></tr>
+          <tr><td><code>smd_include_outcomes</code></td><td><code>true</code></td><td>boolean</td><td>reporting-only use of outcome variables; never feeds a mapping decision</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>BalanceMetric</code> — <code>compare(cohort, pooled, variable) -&gt; Estimate</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>a cohort-membership classifier's AUC</td><td>one number for overall separability</td><td>says cohorts differ but not in which variable, which is the actionable half</td></tr>
+          <tr><td>Kolmogorov–Smirnov per variable</td><td>distribution-shape sensitive, not just means</td><td>not comparable across variable types; no conventional threshold</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Computing SMD against the pooled mean including the cohort itself. With few cohorts the
+        cohort dominates its own reference, shrinking every difference towards zero — exactly when
+        the report matters most.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not adjust, reweight or correct anything. Never let an SMD result feed back into a
+        mapping decision — that would violate §0.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://pubmed.ncbi.nlm.nih.gov/25179855/">Debray 2015 — cohort relatedness</a>
+          <a href="https://multiqc.info/docs/">MultiQC — custom content</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test_full,docker --stop_after coverage
+test -s results/coverage/std_diff_forest.png</code></pre>
+        <p>Every variable appears once per cohort, with the 0.1 line drawn.</p></div>
+    </li>
+  </ol>
+</section>
+
+<section id="s9">
+  <h2><span class="n">§9</span><span>Emit — tables, manifest, provenance, report</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://ohdsi.github.io/CommonDataModel/cdm54.html">OMOP CDM v5.4</a>
+    <a href="https://quarto.org/docs/guide/">Quarto</a>
+    <a href="https://parquet.apache.org/docs/">Parquet</a>
+    <a href="https://multiqc.info/docs/">MultiQC</a>
+  </div>
+
+  <p class="lead">The output has to answer two questions a table cannot: what was this built from,
+  and where did this cell come from. The manifest answers the first and provenance the second, and
+  the report is a <em>view</em> over both — never a second implementation.</p>
+
+  <ol class="steps">
+    <li class="step" id="s9-1">
+      <h3><span class="n">§9.1</span><span>Write the OMOP subset plus the pack-defined extension</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Standard tables are what make the output readable by tools nobody has written yet
+        (principle 4). The extension exists because a five-table subset cannot hold a
+        pack's derived endpoints without pretending they are observations.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   mapped + derived rows
+OUT  results/omop/{person,condition_occurrence,drug_exposure,
+                   measurement,observation}.parquet
+     results/omop/_extension/&lt;pack&gt;.parquet    pack-defined variables
+     results/omop/schema/*.json                published JSON Schema
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <div class="tree"><span class="d">results/omop/</span>
+├── person.parquet                <span class="cm"># person_id, cohort_id, year_of_birth, …</span>
+├── measurement.parquet           <span class="cm"># CDM v5.4 fields + rule_id, rule_version</span>
+├── observation.parquet
+├── condition_occurrence.parquet
+├── drug_exposure.parquet
+├── <span class="d">_extension/</span>
+│   └── oncology-ici.parquet      <span class="cm"># endpoint, time_days, event, criteria</span>
+└── <span class="d">schema/</span>
+    └── measurement.schema.json   <span class="cm"># published; consumers validate against it</span></div></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>outdir</code></td><td><code>results</code></td><td>path</td><td>where everything lands</td><td>CLI</td></tr>
+          <tr><td><code>emit_extension</code></td><td><code>true</code></td><td>boolean</td><td>writes pack-defined variables outside the CDM subset</td><td>config</td></tr>
+          <tr><td><code>parquet_compression</code></td><td><code>zstd</code></td><td><code>zstd</code>|<code>snappy</code>|<code>none</code></td><td>size versus read speed for consumers</td><td>config</td></tr>
+          <tr><td><code>publish_schema</code></td><td><code>true</code></td><td>boolean</td><td>emits the JSON Schema downstream pipelines validate against</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>Emitter</code> — <code>emit(rows, domain) -&gt; Path</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>load straight into a CDM database</td><td>OHDSI tooling works immediately</td><td>a database dependency, and the output stops being a file anyone can copy</td></tr>
+          <tr><td>CSV</td><td>universally readable</td><td>loses types; a partial date becomes a string again</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Forcing derived endpoints into <code>observation</code> to stay pure CDM. It makes the
+        output nominally conformant and semantically wrong — an OS time is not an observation, and
+        every consumer then needs the pack to interpret it anyway.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not claim full CDM conformance — this is a documented subset. Never emit a table
+        without <code>rule_id</code>. Do not write a bespoke binary format.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://ohdsi.github.io/CommonDataModel/cdm54.html">OMOP CDM v5.4</a>
+          <a href="https://parquet.apache.org/docs/">Parquet format</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker
+ls results/omop/*.parquet | wc -l    <span class="c"># 5</span></code></pre>
+        <p>All five tables plus the published schema directory exist.</p></div>
+    </li>
+
+    <li class="step" id="s9-2">
+      <h3><span class="n">§9.2</span><span>Write the mapping manifest and per-cell provenance</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>The manifest is what makes a rerun comparable and a result citable: pack version,
+        vocabulary hash, container digests, params hash. Provenance is what makes a single
+        surprising number answerable rather than argued about.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   ruleset, pack, vocabulary hash, container digests, params
+OUT  results/mapping_manifest.json
+     results/provenance.parquet
+     (target_table, target_row_id, target_field, cohort_id, dataset_id,
+      source_column, source_value, rule_id, rule_version)
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>{ "pipeline_version": "1.0.0",
+  "analysis_git_sha": "…",
+  "concept_pack":    {"name":"oncology-ici","version":"1.2.0","sha256":"…"},
+  "vocabulary":      {"release":"athena-2026-08","sha256":"…"},
+  "containers":      [{"process":"PROFILE","digest":"sha256:…"}],
+  "params_hash": "…",
+  "unsealed": [],                <span class="c"># mirrors unseal.log; empty is the norm</span>
+  "counts": {"cohorts":5,"persons":2140,"rules":214} }
+
+<span class="c"># The generality check is a grep, and it is a build step:</span>
+grep -riE 'melanoma|nsclc|MS4A4A|HARTWIG' modules/ workflows/   <span class="c"># must be empty</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>emit_provenance</code></td><td><code>true</code></td><td>boolean</td><td>per-cell provenance; off makes <code>--audit</code> impossible</td><td>config</td></tr>
+          <tr><td><code>provenance_sample_frac</code></td><td><code>1.0</code></td><td>0.0..1.0</td><td>below 1.0, provenance is a sample and the manifest says so</td><td>config</td></tr>
+          <tr><td><code>audit</code></td><td><code>null</code></td><td>cell address</td><td>reconstructs one cell's raw value and exits</td><td>CLI</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>ProvenanceSink</code> — <code>record(cell, source, rule) -&gt; void</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>column-level provenance only</td><td>orders of magnitude smaller</td><td><code>--audit</code> can no longer explain one anomalous value, which is its main use</td></tr>
+          <tr><td>W3C PROV-O graph</td><td>a standard others can consume</td><td>a triple store to query what a Parquet join already answers</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Recording the vocabulary release name without its hash. Releases are re-cut, so the name
+        alone makes a rerun that silently used different mappings look identical in the manifest.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not write provenance as a log file — it must be joinable. Never omit the pack hash.
+        Do not let a disease term, gene symbol or cohort name reach process logic.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://nf-co.re/docs/guidelines/components/modules">nf-core module conventions</a>
+          <a href="https://ohdsi.github.io/CommonDataModel/dataModelConventions.html">CDM conventions</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker
+nextflow run . --audit measurement:1187423:value_as_number</code></pre>
+        <p>The audit prints cohort, dataset, source column, raw value and rule id.</p></div>
+    </li>
+
+    <li class="step" id="s9-3">
+      <h3><span class="n">§9.3</span><span>Render the report from results only</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>A report that recomputes drifts from the pipeline and cannot be re-rendered without
+        re-running it. Making <code>results/</code> the render process's only input enforces
+        principle 11 mechanically: raw data is not staged, so a recomputing report cannot run.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   path results        <span class="c"># the ONLY input — no raw data is staged</span>
+OUT  results/_site/       browsable HTML
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>process RENDER_REPORT {
+    input:  path results
+    output: path "_site"
+    script: "quarto render report --output-dir _site"
+}
+<span class="c"># report/  index.qmd  qc.qmd  results.qmd  provenance.qmd</span>
+<span class="c"># A .qmd may READ results/**.parquet and *_manifest.json and render</span>
+<span class="c"># them. It may not load a raw input, fit a model, compute a</span>
+<span class="c"># statistic, or derive an endpoint.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>report</code></td><td><code>true</code></td><td>boolean</td><td>renders the Quarto site as a terminal process</td><td>config</td></tr>
+          <tr><td><code>report_title</code></td><td><code>Harmonization run</code></td><td>string</td><td>cosmetic; appears in the site header</td><td>config</td></tr>
+          <tr><td><code>report_include_counts</code></td><td><code>true</code></td><td>boolean</td><td>off when cohort-level counts are disclosure-sensitive</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>Reporter</code> — <code>render(resultsDir) -&gt; SiteDir</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>MultiQC only</td><td>no Quarto dependency; nf-core native</td><td>no narrative sections, and custom plots become JSON gymnastics</td></tr>
+          <tr><td>a static site built in CI</td><td>decouples rendering from the run entirely</td><td>the report can then be built from a results set that no run produced</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Letting one <code>.qmd</code> compute "just the median" from a raw table. The report now
+        has a number the pipeline never wrote, so it cannot be reproduced from
+        <code>results/</code> and the delete-the-inputs test fails.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Never stage a raw input into this process. Do not fit a model or compute a statistic in
+        a <code>.qmd</code>. Do not publish a report whose numbers are absent from
+        <code>results/</code>.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://quarto.org/docs/projects/quarto-projects.html">Quarto projects</a>
+          <a href="https://www.nextflow.io/docs/latest/process.html">Nextflow — process inputs</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker
+rm -rf test_data/ &amp;&amp; quarto render report --output-dir _site</code></pre>
+        <p>The render succeeds with every raw input deleted — principle 11's actual test.</p></div>
+    </li>
+  </ol>
+</section>
+<section id="s10">
+  <h2><span class="n">§10</span><span>Test architecture — what proves the invariant</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://www.nf-test.com/docs/getting-started/">nf-test</a>
+    <a href="https://www.nf-test.com/docs/assertions/assertions/">nf-test assertions</a>
+    <a href="https://github.com/OHDSI/Eunomia">Eunomia fixture</a>
+    <a href="https://physionet.org/content/mimic-iv-demo/2.2/">MIMIC-IV demo fixture</a>
+  </div>
+
+  <p class="lead">Three tests carry the design: one proves the invariant, one proves the modules,
+  one proves generality. Everything else is regression. Both fixtures are public and non-oncology,
+  which is what keeps the generality claim honest rather than aspirational.</p>
+
+  <ol class="steps">
+    <li class="step" id="s10-1">
+      <h3><span class="n">§10.1</span><span>The outcome-permutation harness — the invariant's only proof</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>§0 is a claim about a function's inputs, and the only way to test such a claim is to
+        vary the input that must not matter and observe that nothing changes. Every other check in
+        this pipeline could pass with the invariant violated.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   a fixture cohort set + --permute_outcome_seed 1..N
+OUT  N hashes of ledger.proposed.yaml — all identical, or the test fails
+     tests/invariant/report.json  {n_permutations, n_distinct_hashes}
+SIDE none; runs in CI on every push</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code><span class="c"># Scope: the PROPOSER, not the whole pipeline. §8.3 legitimately reads</span>
+<span class="c"># outcome variables for REPORTING, and reporting is not a mapping</span>
+<span class="c"># decision. Testing end-to-end would fail on that and be relaxed.</span>
+
+for seed in 1..100:
+    permute outcome column WITHIN each cohort   <span class="c"># preserves marginals</span>
+    run  --stop_after propose
+    collect sha256(ledger.proposed.yaml)
+assert len(set(hashes)) == 1</code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>permute_outcome_seed</code></td><td><code>null</code></td><td>int or range</td><td>test-only; permutes within cohort so marginals are preserved</td><td>CLI</td></tr>
+          <tr><td><code>invariant_n_permutations</code></td><td><code>100</code></td><td>10..10000</td><td>CI uses 100; a release run uses more</td><td>config</td></tr>
+          <tr><td><code>invariant_scope</code></td><td><code>propose</code></td><td><code>propose</code>|<code>map</code>|<code>all</code></td><td>widening it is a design change, not a config tweak</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>InvariantProbe</code> — <code>perturb(inputs, seed) -&gt; inputs</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>static analysis of the call graph</td><td>catches the dependency without running anything</td><td>misses leakage through a derived or cached intermediate</td></tr>
+          <tr><td>drop the outcome column entirely</td><td>strictly stronger — nothing can read it</td><td>breaks §8.3's reporting, so it cannot run as the same test</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Permuting across cohorts instead of within. That changes each cohort's outcome marginal,
+        so a channel legitimately reading cohort size appears to leak — the test then fails
+        spuriously and gets weakened until it proves nothing.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not relax the assertion to "hashes mostly agree". Never exclude a channel from the
+        harness to make it pass. Do not run it only before releases.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://www.nf-test.com/docs/assertions/assertions/">nf-test assertions</a>
+          <a href="https://github.com/OHDSI/Eunomia">Eunomia</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/invariant.nf.test</code></pre>
+        <p>100 permutations yield one hash; deliberately wiring the outcome into a channel makes
+        the test fail.</p></div>
+    </li>
+
+    <li class="step" id="s10-2">
+      <h3><span class="n">§10.2</span><span>Module and pipeline tests on two public fixtures</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Eunomia is native OMOP and tiny — perfect for CI, and useless for proving the pipeline
+        handles mess. MIMIC-IV demo is genuinely messy with many tables per subject, which is the
+        real JOIN-then-UNION shape. Both are needed and neither is oncology.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   -profile test       -&gt; Eunomia          (CI, every push)
+     -profile test_full  -&gt; MIMIC-IV demo    (nightly; multi-centre
+                                              exercised as multi-cohort)
+OUT  nf-test snapshots + versions.yml from every process
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <div class="tree"><span class="d">tests/</span>
+├── ingest.nf.test            <span class="cm"># §1.1 duplicate key rejection</span>
+├── link_score.nf.test        <span class="cm"># §3.2 three-way agreement</span>
+├── propose_channels.nf.test  <span class="cm"># §4.2 per-channel behaviour</span>
+├── units.nf.test             <span class="cm"># §6.2 analyte-specific factors</span>
+├── endpoints_inverted.nf.test<span class="cm"># §7.2 rising-KM detection</span>
+├── invariant.nf.test         <span class="cm"># §10.1 — the one that matters</span>
+└── generality.nf.test        <span class="cm"># §10.3</span></div></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>test_data_base</code></td><td>nf-core test-datasets URL</td><td>url</td><td>where fixtures are fetched from</td><td>profile</td></tr>
+          <tr><td><code>max_memory</code></td><td><code>6.GB</code></td><td>memory</td><td>keeps <code>-profile test</code> runnable on a laptop and in CI</td><td>profile</td></tr>
+          <tr><td><code>snapshot_update</code></td><td><code>false</code></td><td>boolean</td><td>regenerates nf-test snapshots; never true in CI</td><td>CLI</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>Fixture</code> — <code>load(profile) -&gt; [CohortDir]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>a synthetic generator</td><td>every failure mode on demand, no download</td><td>synthetic data never surprises you, which is the point of a real fixture</td></tr>
+          <tr><td>full MIMIC-IV</td><td>realistic scale</td><td>credentialed access, so CI cannot run it and the fixture stops being public</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Using Eunomia alone because it is already OMOP. It never exercises §4 or §6 in earnest —
+        its columns are already mapped — so a matcher can be badly broken and CI stays green.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not add an oncology fixture as the primary test. Never commit fixture data to the
+        repo. Do not update a snapshot to make a failing test pass.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://www.nf-test.com/docs/getting-started/">nf-test — getting started</a>
+          <a href="https://physionet.org/content/mimic-iv-demo/2.2/">MIMIC-IV demo</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test --profile test
+nextflow run . -profile test_full,docker</code></pre>
+        <p>Both fixtures run green with no sibling pipeline installed (principle 3).</p></div>
+    </li>
+
+    <li class="step" id="s10-3">
+      <h3><span class="n">§10.3</span><span>The generality test — a different disease, unmodified</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>Generality claimed is generality lost. The only convincing evidence is a green run on a
+        cohort set from a different clinical domain with a different pack, with not one line of the
+        pipeline changed.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   a non-oncology cohort set + assets/packs/critical-care.yaml
+OUT  a complete result set: OMOP subset, manifest, provenance, coverage
+     tests/generality/grep_report.txt
+SIDE fails the build on any disease term found in modules/ or workflows/</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>nextflow run . -profile test_full,docker \
+  --concept_pack assets/packs/critical-care.yaml
+
+<span class="c"># AND the grep, which is a build step, not a habit:</span>
+grep -riE 'melanoma|nsclc|carcinoma|RECIST|MS4A4A|HARTWIG|TCGA' \
+     modules/ workflows/ | tee tests/generality/grep_report.txt
+test ! -s tests/generality/grep_report.txt
+
+<span class="c"># RECIST is in the list deliberately: it belongs to an oncology PACK,</span>
+<span class="c"># never to §7.3's logic, which reads `criteria_version` from config.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>concept_pack</code></td><td><code>assets/packs/minimal.yaml</code></td><td>path or url</td><td>swapping it is the entire generality test</td><td>CLI</td></tr>
+          <tr><td><code>generality_terms</code></td><td><code>assets/forbidden_terms.txt</code></td><td>path</td><td>the grep list; adding a term is cheap and should be routine</td><td>config</td></tr>
+          <tr><td><code>generality_paths</code></td><td><code>[modules/, workflows/]</code></td><td>path list</td><td>where logic lives; <code>assets/</code> is deliberately excluded</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>GeneralityAudit</code> — <code>audit(paths, terms) -&gt; [Violation]</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>a linter with an allowlist</td><td>fewer false positives on comments and docstrings</td><td>an allowlist is where exceptions accumulate until the check means nothing</td></tr>
+          <tr><td>run three packs in CI</td><td>much stronger evidence of generality</td><td>CI time roughly triples for a property one pack already demonstrates</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Grepping for words only. The subtler leaks are numeric — a plausible range hard-coded
+        because "TPS is 0–100", a default unit chosen for one assay, a derivation assuming
+        progression precedes death. None is caught by a word list.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not exempt a path from the grep to make it pass. Never let the non-oncology run be
+        optional. Do not add a disease term to <code>assets/</code> logic files.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://nf-co.re/docs/guidelines/pipelines/overview">nf-core pipeline guidelines</a>
+          <a href="https://github.com/OHDSI/Eunomia">Eunomia — non-oncology fixture</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nf-test test tests/generality.nf.test</code></pre>
+        <p>A green run on the critical-care pack, and an empty <code>grep_report.txt</code>.</p></div>
+    </li>
+  </ol>
+</section>
+
+<section id="s11">
+  <h2><span class="n">§11</span><span>Config, environment, dependency pinning</span></h2>
+  <div class="docs"><span class="lbl">Docs</span>
+    <a href="https://nextflow-io.github.io/nf-schema/latest/nextflow_schema/nextflow_schema_specification/">nf-schema — schema spec</a>
+    <a href="https://www.nextflow.io/docs/latest/config.html">Nextflow config</a>
+    <a href="https://www.nextflow.io/docs/latest/container.html">Nextflow containers</a>
+    <a href="https://biocontainers.pro/">BioContainers</a>
+  </div>
+
+  <p class="lead">Every <code>params</code> row in every step card above is a
+  <code>nextflow_schema.json</code> property. That is not bookkeeping — it is what makes the
+  schematic's parameter tables checkable against the implementation rather than aspirational.</p>
+
+  <ol class="steps">
+    <li class="step" id="s11-1">
+      <h3><span class="n">§11.1</span><span>Project every params row into nextflow_schema.json</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>A magic number inside a process body is invisible to <code>--help</code>, unvalidated,
+        and absent from the manifest's params hash — so a run that used a different value is
+        indistinguishable from one that did not.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   the params tables of §1–§10
+OUT  nextflow_schema.json     one property per row, with that exact default
+     --help                   generated from it
+SIDE nf-schema fails the run on an unknown or out-of-domain param</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>{ "match_threshold": {
+    "type": "number", "default": 12.0, "minimum": 0,
+    "description": "Match weight above which two records are one person",
+    "help_text": "See schematic §3.3. Lowering this over-links: N shrinks
+                  and variance is understated.",
+    "fa_icon": "fas fa-link" } }
+
+<span class="c"># The `domain` column becomes minimum/maximum or enum.</span>
+<span class="c"># The `effect` column becomes help_text. Neither is optional.</span></code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>validate_params</code></td><td><code>true</code></td><td>boolean</td><td>nf-schema validation; off means a typo becomes a silent default</td><td>config</td></tr>
+          <tr><td><code>schema_ignore_params</code></td><td><code>[]</code></td><td>string list</td><td>every entry is a hole in validation; keep it empty</td><td>config</td></tr>
+          <tr><td><code>params_hash_file</code></td><td><code>results/params_hash.txt</code></td><td>path</td><td>what the manifest and <code>locked_model.json</code> compare</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>ParamStore</code> — <code>get(name) -&gt; value</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>a YAML params file per cohort</td><td>per-cohort overrides without long CLI lines</td><td>a second precedence order to reason about, and a hash that must cover both</td></tr>
+          <tr><td>hard-coded defaults in modules</td><td>fewer files</td><td>violates principle 6; defaults vanish from <code>--help</code> and the manifest</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Adding a param to the schema and a different default in the process. nf-schema validates
+        the declared value, the process uses its own, and the manifest records the one that was
+        never applied — a reproducibility bug that reproduces perfectly.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Do not read an environment variable inside a process. Never add to
+        <code>schema_ignore_params</code>. Do not leave a step's params table unrepresented.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://nextflow-io.github.io/nf-schema/latest/nextflow_schema/nextflow_schema_specification/">nf-schema — schema specification</a>
+          <a href="https://www.nextflow.io/docs/latest/config.html">Nextflow — configuration</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . --help
+nextflow run . -profile test,docker --match_threshold -1   <span class="c"># rejected</span></code></pre>
+        <p>Every params row in this document appears in <code>--help</code> with its stated default.</p></div>
+    </li>
+
+    <li class="step" id="s11-2">
+      <h3><span class="n">§11.2</span><span>Pin containers and emit versions from every process</span></h3>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>The vocabulary release, the pack and the container digests are the three things that
+        make two runs comparable. A floating tag makes the other two pointless: same manifest,
+        different arithmetic.</p></div>
+      <div class="slot" data-slot="io"><span class="lbl">I/O</span>
+        <pre><code>IN   process definitions
+OUT  versions.yml per process -&gt; collated into the manifest
+     software_versions.yml    -&gt; MultiQC section
+SIDE none</code></pre></div>
+      <div class="slot" data-slot="contract"><span class="lbl">Contract</span>
+        <pre><code>container "biocontainers/duckdb:1.1.3--h1234567_0"   <span class="c"># digest-pinned</span>
+
+<span class="c"># NEVER `:latest`, never a bare major tag.</span>
+<span class="c"># versions.yml, emitted by every process:</span>
+"${task.process}":
+    duckdb: $(duckdb --version | sed 's/^v//')
+    python: $(python --version | sed 's/Python //')</code></pre></div>
+      <div class="slot" data-slot="params"><span class="lbl">Params</span>
+        <div class="tw"><table>
+          <thead><tr><th>name</th><th>default</th><th>domain</th><th>effect</th><th>set by</th></tr></thead>
+          <tbody>
+          <tr><td><code>container_registry</code></td><td><code>quay.io</code></td><td>hostname</td><td>where images are pulled from</td><td>config</td></tr>
+          <tr><td><code>singularity_cache</code></td><td><code>$NXF_SINGULARITY_CACHEDIR</code></td><td>path</td><td>image cache on HPC</td><td>profile</td></tr>
+          <tr><td><code>fail_on_floating_tag</code></td><td><code>true</code></td><td>boolean</td><td>a lint step rejecting any unpinned container reference</td><td>config</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="alts"><span class="lbl">Alternatives</span>
+        <p><strong>Seam:</strong> <code>Runtime</code> — the <code>-profile</code> axis: <code>docker | singularity | conda</code></p>
+        <div class="tw"><table>
+          <thead><tr><th>alternative</th><th>why you'd swap</th><th>swap cost</th></tr></thead>
+          <tbody>
+          <tr><td>conda environments</td><td>no container runtime on restricted HPC</td><td>solver drift; two runs a month apart differ, which pinning was meant to prevent</td></tr>
+          <tr><td>one fat image</td><td>a single pull; simpler caching</td><td>violates principle 8 and needs an ADR; every process rebuilds on any change</td></tr>
+          </tbody>
+        </table></div></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>Pinning the image and letting the process <code>pip install</code> at runtime. The digest
+        is then honest about the base and silent about what actually ran, which is the half that
+        changed.</p></div>
+      <div class="slot" data-slot="nogo"><span class="lbl">Not here</span>
+        <p>Never use a floating tag. Do not install anything at runtime. Do not build a bespoke
+        image without an ADR in §15.</p></div>
+      <div class="slot" data-slot="docs"><span class="lbl">Docs</span>
+        <div class="lnks">
+          <a href="https://www.nextflow.io/docs/latest/container.html">Nextflow — containers</a>
+          <a href="https://biocontainers.pro/">BioContainers</a>
+        </div></div>
+      <div class="slot" data-slot="done"><span class="lbl">Done when</span>
+        <pre><code>nextflow run . -profile test,docker
+grep -c ':latest' modules/**/main.nf    <span class="c"># 0</span>
+test -s results/pipeline_info/software_versions.yml</code></pre>
+        <p>Every process contributes a versions entry and no container reference floats.</p></div>
+    </li>
+  </ol>
+</section>
+
+<section id="s12">
+  <h2><span class="n">§12</span><span>Anti-patterns — the code-review checklist</span></h2>
+
+  <p class="lead">Each line is a defect this document already argued against, in the form a reviewer
+  can check in one pass. The section number is where the argument lives.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>§</th><th>Anti-pattern</th><th>Why it is a defect</th></tr></thead>
+    <tbody>
+      <tr><td>§1.1</td><td>Treating <code>cohort_id</code> as the primary key</td><td>silent duplication that surfaces as a §3 linkage failure</td></tr>
+      <tr><td>§1.2</td><td>Filtering held-out data inside the reading process</td><td>the path is already staged; the seal is decoration</td></tr>
+      <tr><td>§2.1</td><td>Storing cardinality without the unique-value set</td><td>kills the one channel that survives a rename</td></tr>
+      <tr><td>§2.2</td><td>Emitting one unit instead of a ranked list</td><td>a committed guess becomes a silent conversion error</td></tr>
+      <tr><td>§2.3</td><td>Dropping an unprofilable column</td><td>converts a finding into an unexplainable coverage number</td></tr>
+      <tr><td>§3.1</td><td>Choosing blocking rules by pair count</td><td>excludes the hard cases; a clean histogram means the wrong thing</td></tr>
+      <tr><td>§3.2</td><td>Folding missing into disagreement</td><td>looks like under-linkage; gets fixed with the wrong knob</td></tr>
+      <tr><td>§3.3</td><td>Tuning the threshold until N looks right</td><td>N is what is being measured; the linkage becomes unfalsifiable</td></tr>
+      <tr><td>§4.1</td><td>Generating candidates from concept names alone</td><td>loses every institution-coded column, silently</td></tr>
+      <tr><td>§4.2</td><td>Six channels that all restate name similarity</td><td>you have one channel and five decorations</td></tr>
+      <tr><td>§4.3</td><td>A non-deterministic proposal ledger</td><td>the invariant test fails always, then gets switched off</td></tr>
+      <tr><td>§5.1</td><td>Auto-confirming the top proposal outside <code>-profile test</code></td><td>deletes the only human review step in the design</td></tr>
+      <tr><td>§5.2</td><td><code>rule_id</code> derived from position or time</td><td>an audit against older output resolves to the wrong rule</td></tr>
+      <tr><td>§6.1</td><td>Dropping <code>source_concept_id</code></td><td>the many-to-one map becomes irreversible</td></tr>
+      <tr><td>§6.2</td><td>One conversion factor per unit pair</td><td>analyte-blind; produces plausible wrong values</td></tr>
+      <tr><td>§6.3</td><td>Mapping best response as a value</td><td>imports an unrecorded criteria version</td></tr>
+      <tr><td>§7.1</td><td>Completing a partial date to the 1st</td><td>biases every interval in one direction</td></tr>
+      <tr><td>§7.2</td><td>Assuming censoring is coded 0/1</td><td>1/2 is equally common and indistinguishable from the value set</td></tr>
+      <tr><td>§7.3</td><td>Pooling responses across criteria versions</td><td>shifts the response rate exactly like a treatment effect</td></tr>
+      <tr><td>§8.1</td><td>Counting a variable as covered because the column exists</td><td>promises data the imputation stage must invent</td></tr>
+      <tr><td>§8.2</td><td>One missingness rate per variable across cohorts</td><td>averages 100% and 0% into a number that licenses the wrong fix</td></tr>
+      <tr><td>§9.2</td><td>Recording the vocabulary release without its hash</td><td>a re-cut release makes two different runs look identical</td></tr>
+      <tr><td>§9.3</td><td>A <code>.qmd</code> that computes anything</td><td>the report drifts and cannot be re-rendered from <code>results/</code></td></tr>
+      <tr><td>§10.1</td><td>Permuting the outcome across cohorts</td><td>spurious failure, then a weakened assertion</td></tr>
+      <tr><td>§11.1</td><td>A schema default differing from the process default</td><td>a reproducibility bug that reproduces perfectly</td></tr>
+      <tr><td>§11.2</td><td>Installing packages at runtime</td><td>the digest is honest about the base and silent about what ran</td></tr>
+    </tbody>
+  </table></div>
+</section>
+<section id="s13">
+  <h2><span class="n">§13</span><span>Canonical references — the docs you code against</span></h2>
+
+  <p class="lead">Version-pinned and HTTP-verified 2026-08-13. The per-step <code>docs</code> slots
+  are narrower — "which page is open while I write <em>this</em> function". This is the shelf.</p>
+
+  <h3><span class="n">§13.1</span><span>Workflow engine and framework</span></h3>
+  <div class="tw"><table>
+    <thead><tr><th>What</th><th>Where</th><th>Used by</th></tr></thead>
+    <tbody>
+      <tr><td>Nextflow — channels</td><td><a href="https://www.nextflow.io/docs/latest/channel.html">nextflow.io/docs/latest/channel.html</a></td><td>§1.2 holdout seal</td></tr>
+      <tr><td>Nextflow — process</td><td><a href="https://www.nextflow.io/docs/latest/process.html">…/process.html</a></td><td>§5.1, §9.3</td></tr>
+      <tr><td>Nextflow — configuration</td><td><a href="https://www.nextflow.io/docs/latest/config.html">…/config.html</a></td><td>§11.1</td></tr>
+      <tr><td>Nextflow — containers</td><td><a href="https://www.nextflow.io/docs/latest/container.html">…/container.html</a></td><td>§11.2</td></tr>
+      <tr><td>nf-core — pipeline guidelines</td><td><a href="https://nf-co.re/docs/guidelines/pipelines/overview">nf-co.re/docs/guidelines/pipelines/overview</a></td><td>principles 1–3</td></tr>
+      <tr><td>nf-core — module conventions</td><td><a href="https://nf-co.re/docs/guidelines/components/modules">…/components/modules</a></td><td>principle 2</td></tr>
+      <tr><td>nf-schema</td><td><a href="https://nextflow-io.github.io/nf-schema/latest/nextflow_schema/nextflow_schema_specification/">nf-schema — schema spec</a></td><td>§1.1, §11.1</td></tr>
+      <tr><td>nf-test</td><td><a href="https://www.nf-test.com/docs/assertions/assertions/">nf-test.com — assertions</a></td><td>§10</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="n">§13.2</span><span>Clinical data model and vocabularies</span></h3>
+  <div class="tw"><table>
+    <thead><tr><th>What</th><th>Where</th><th>Used by</th></tr></thead>
+    <tbody>
+      <tr><td>OMOP CDM v5.4</td><td><a href="https://ohdsi.github.io/CommonDataModel/cdm54.html">ohdsi.github.io/CommonDataModel/cdm54.html</a></td><td>§6.1, §9.1</td></tr>
+      <tr><td>CDM conventions</td><td><a href="https://ohdsi.github.io/CommonDataModel/dataModelConventions.html">…/dataModelConventions.html</a></td><td>§5.2, §9.2</td></tr>
+      <tr><td>Book of OHDSI — the CDM</td><td><a href="https://ohdsi.github.io/TheBookOfOhdsi/CommonDataModel.html">TheBookOfOhdsi — CommonDataModel</a></td><td>§6.1</td></tr>
+      <tr><td>Book of OHDSI — vocabularies</td><td><a href="https://ohdsi.github.io/TheBookOfOhdsi/StandardizedVocabularies.html">…/StandardizedVocabularies.html</a></td><td>§4.1, §6.1, §6.3</td></tr>
+      <tr><td>Book of OHDSI — data quality</td><td><a href="https://ohdsi.github.io/TheBookOfOhdsi/DataQuality.html">…/DataQuality.html</a></td><td>§2.3, §8</td></tr>
+      <tr><td>ATHENA vocabularies</td><td><a href="https://athena.ohdsi.org/">athena.ohdsi.org</a></td><td>§4.1 — pinned release</td></tr>
+      <tr><td>UCUM</td><td><a href="https://ucum.org/ucum">ucum.org/ucum</a></td><td>§2.2, §6.2</td></tr>
+      <tr><td>RxNorm</td><td><a href="https://www.nlm.nih.gov/research/umls/rxnorm/index.html">nlm.nih.gov — RxNorm</a></td><td>§6.1 drug_exposure</td></tr>
+      <tr><td>NCI Thesaurus</td><td><a href="https://ncithesaurus.nci.nih.gov/">ncithesaurus.nci.nih.gov</a></td><td>pack assets only</td></tr>
+      <tr><td>Usagi</td><td><a href="https://ohdsi.github.io/Usagi/">ohdsi.github.io/Usagi</a></td><td>§5.1 — the GUI equivalent</td></tr>
+      <tr><td>DataQualityDashboard</td><td><a href="https://github.com/OHDSI/DataQualityDashboard">OHDSI/DataQualityDashboard</a></td><td>§8 — do not reinvent</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3><span class="n">§13.3</span><span>Matching, endpoints, and the data layer</span></h3>
+  <div class="tw"><table>
+    <thead><tr><th>What</th><th>Where</th><th>Used by</th></tr></thead>
+    <tbody>
+      <tr><td>splink — Fellegi–Sunter</td><td><a href="https://moj-analytical-services.github.io/splink/topic_guides/theory/fellegi_sunter.html">splink — the F-S model</a></td><td>§3.2</td></tr>
+      <tr><td>splink — blocking rules</td><td><a href="https://moj-analytical-services.github.io/splink/topic_guides/blocking/blocking_rules.html">…/blocking_rules.html</a></td><td>§3.1</td></tr>
+      <tr><td>ICH E9(R1) estimands</td><td><a href="https://database.ich.org/sites/default/files/E9-R1_Step4_Guideline_2019_1203.pdf">ich.org — E9(R1) addendum</a></td><td>§7.2</td></tr>
+      <tr><td>RECIST 1.1</td><td><a href="https://pubmed.ncbi.nlm.nih.gov/19097774/">PMID 19097774</a></td><td>§7.3 — pack asset</td></tr>
+      <tr><td>iRECIST</td><td><a href="https://pubmed.ncbi.nlm.nih.gov/28271869/">PMID 28271869</a></td><td>§7.3 — pack asset</td></tr>
+      <tr><td>Cohort relatedness (Debray 2015)</td><td><a href="https://pubmed.ncbi.nlm.nih.gov/25179855/">PMID 25179855</a></td><td>§8.3</td></tr>
+      <tr><td>lifelines</td><td><a href="https://lifelines.readthedocs.io/en/latest/">lifelines.readthedocs.io</a></td><td>§7.2 KM checks</td></tr>
+      <tr><td>scikit-survival</td><td><a href="https://scikit-survival.readthedocs.io/en/stable/">scikit-survival</a></td><td>§7.2 competing risks</td></tr>
+      <tr><td>DuckDB</td><td><a href="https://duckdb.org/docs/">duckdb.org/docs</a></td><td>§2.1, §3, §8</td></tr>
+      <tr><td>Polars</td><td><a href="https://docs.pola.rs/">docs.pola.rs</a></td><td>§2.1</td></tr>
+      <tr><td>Parquet / Arrow</td><td><a href="https://arrow.apache.org/docs/python/parquet.html">arrow.apache.org — Parquet</a></td><td>§9.1</td></tr>
+      <tr><td>JSON Schema</td><td><a href="https://json-schema.org/understanding-json-schema">json-schema.org</a></td><td>§1.1, §9.1</td></tr>
+      <tr><td>Quarto projects</td><td><a href="https://quarto.org/docs/projects/quarto-projects.html">quarto.org — projects</a></td><td>§9.3</td></tr>
+      <tr><td>MultiQC</td><td><a href="https://multiqc.info/docs/">multiqc.info/docs</a></td><td>§3.3, §8</td></tr>
+      <tr><td>BioContainers</td><td><a href="https://biocontainers.pro/">biocontainers.pro</a></td><td>§11.2</td></tr>
+      <tr><td>Eunomia fixture</td><td><a href="https://github.com/OHDSI/Eunomia">OHDSI/Eunomia</a></td><td>§10.2 <code>-profile test</code></td></tr>
+      <tr><td>MIMIC-IV demo fixture</td><td><a href="https://physionet.org/content/mimic-iv-demo/2.2/">physionet.org — MIMIC-IV demo 2.2</a></td><td>§10.2 <code>-profile test_full</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s14">
+  <h2><span class="n">§14</span><span>Build standards — the non-negotiables</span></h2>
+
+  <h3><span class="n">§14.1</span><span>Inherited</span></h3>
+  <ul>
+    <li><strong>nf-core template.</strong> Generated with <code>nf-core create</code>;
+        <code>nf-core lint</code> passes with no ignored rules beyond the template's own.</li>
+    <li><strong>nf-core/modules first.</strong> A local module exists only where no nf-core module
+        does, and its existence is justified in that step's <code>why</code>.</li>
+    <li><strong>Params in <code>nextflow_schema.json</code></strong>, validated by nf-schema. No
+        magic numbers in process bodies (§11.1).</li>
+    <li><strong>Containers from biocontainers</strong>, digest-pinned; a bespoke image requires an
+        ADR in §15 (§11.2).</li>
+    <li><strong><code>versions.yml</code> from every process</strong>, collated into the manifest
+        and the MultiQC report.</li>
+    <li><strong>nf-test at module and pipeline level</strong>, plus GitHub Actions CI on every push.</li>
+  </ul>
+
+  <h3><span class="n">§14.2</span><span>Additions this build requires</span></h3>
+  <ul>
+    <li><strong>The invariant harness runs in CI</strong>, on every push, at 100 permutations
+        (§10.1). Not nightly, not pre-release.</li>
+    <li><strong>Standalone execution is the acceptance test.</strong> Green under
+        <code>-profile test,docker</code> with no sibling pipeline installed (principle 3).</li>
+    <li><strong>A non-oncology run is mandatory.</strong> The pipeline runs unmodified on a
+        different clinical domain with a different pack, and the forbidden-term grep is empty
+        (§10.3).</li>
+    <li><strong>Held-out data is excluded at channel construction</strong>, and
+        <code>--unseal</code> refuses without a hash-matching <code>locked_model.json</code>
+        (§1.2).</li>
+    <li><strong>Every emitted cell carries <code>rule_id</code> and <code>rule_version</code></strong>,
+        and <code>--audit</code> reconstructs its raw value (§9.2).</li>
+    <li><strong>The report renders from <code>results/</code> alone</strong> — verified by deleting
+        every raw input and re-rendering (§9.3).</li>
+    <li><strong>No disease assumption in logic.</strong> Not as a word, and not as a hard-coded
+        range, unit or ordering (§10.3).</li>
+  </ul>
+
+  <h3><span class="n">§14.3</span><span>Definition of done, per stage</span></h3>
+  <div class="tw"><table>
+    <thead><tr><th>Stage</th><th>Done means</th><th>Diagnostic emitted</th></tr></thead>
+    <tbody>
+      <tr><td>§1 Ingest</td><td>duplicate keys rejected; held-out rows never staged</td><td><code>unseal.log</code></td></tr>
+      <tr><td>§2 Profile</td><td>one record per column; failures manifested</td><td><code>profiles/_failed.json</code></td></tr>
+      <tr><td>§3 Link</td><td>every task placed; clerical band reported not resolved</td><td>match-weight histogram</td></tr>
+      <tr><td>§4 Propose</td><td>ledger hash invariant under outcome permutation</td><td>per-candidate confirmation plots</td></tr>
+      <tr><td>§5 Confirm</td><td>no auto-confirm outside <code>-profile test</code></td><td><code>ledger.confirmed.yaml</code></td></tr>
+      <tr><td>§6 Map</td><td>no invented concept ids; conversions analyte-aware</td><td>alluvial per collapsed variable</td></tr>
+      <tr><td>§7 Derive</td><td>time and event derived together; criteria recorded</td><td>per-cohort KM curves</td></tr>
+      <tr><td>§8 Coverage</td><td>frontier emitted; no operating point chosen</td><td>heatmap, frontier, SMD forest</td></tr>
+      <tr><td>§9 Emit</td><td>five tables + manifest + provenance; report is a view</td><td><code>mapping_manifest.json</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s15">
+  <h2><span class="n">§15</span><span>Decision log</span></h2>
+
+  <div class="adr">
+    <div class="adr-head"><span class="adr-id">ADR-001</span><span class="adr-t">The target variable set is a runtime concept pack, not a baked-in schema</span><span class="chip safe">accepted</span></div>
+    <p><span class="k">context</span> The first design named an ICS/ICI-specific extension to the CDM subset. That made the pipeline an oncology tool with a general-sounding name.</p>
+    <p><span class="k">decision</span> The pack — a hashed YAML asset — declares every target variable, its domain, its concept id, its type and whether it is an outcome. Shipped packs live at <code>assets/packs/*.yaml</code>; <code>--concept_pack</code> takes any path or URL, so a private pack never enters the repo.</p>
+    <p><span class="k">consequence</span> Generality becomes checkable (§10.3) rather than claimed, and the invariant binds whatever <em>this</em> pack calls an outcome. Cost: nothing in the pipeline can be written knowing what a variable means.</p>
+  </div>
+
+  <div class="adr">
+    <div class="adr-head"><span class="adr-id">ADR-002</span><span class="adr-t">The pipeline proposes; it never decides a mapping</span><span class="chip safe">accepted</span></div>
+    <p><span class="k">context</span> A matcher confident enough to auto-map is confident enough to be wrong invisibly, and its confidence is exactly where outcome leakage would hide.</p>
+    <p><span class="k">decision</span> §4 emits a ranked ledger with a per-channel evidence vector and a confirmation plot per proposal. §5 requires a human-confirmed ledger file. Auto-confirm exists only under <code>-profile test</code>.</p>
+    <p><span class="k">consequence</span> A real run cannot complete unattended the first time. That is the point: the gate is a file, so the decision is auditable, diffable in review, and the rerun deterministic — none of which a GUI prompt would give.</p>
+  </div>
+
+  <div class="adr">
+    <div class="adr-head"><span class="adr-id">ADR-003</span><span class="adr-t">The invariant harness scopes to the proposer, not the whole pipeline</span><span class="chip frozen">accepted</span></div>
+    <p><span class="k">context</span> §8.3's standardized-difference forest legitimately reads outcome variables — it is reporting, not a mapping decision. An end-to-end permutation test would fail on it.</p>
+    <p><span class="k">decision</span> <code>invariant_scope</code> defaults to <code>propose</code>. Widening it is a design change requiring a superseding ADR, not a config edit.</p>
+    <p><span class="k">consequence</span> The test stays true, so it stays enabled. The residual risk is a leak entering after §4 — which §12's checklist and the confirm gate are the compensating controls for. Reviewed at the phase-3 gate.</p>
+  </div>
+
+  <div class="adr">
+    <div class="adr-head"><span class="adr-id">ADR-004</span><span class="adr-t">Held-out data is a per-dataset setting with a lock, not a one-time ritual</span><span class="chip safe">accepted</span></div>
+    <p><span class="k">context</span> The predecessor design named one cohort and described unsealing it as a documented human ceremony. A ceremony is not enforceable and a log-only record reports the violation after the damage.</p>
+    <p><span class="k">decision</span> <code>holdout</code> is a samplesheet boolean; held-out rows are dropped at channel construction; <code>--unseal &lt;id&gt;</code> refuses unless <code>locked_model.json</code> exists and its hash matches the analysis about to run, then appends to <code>unseal.log</code>.</p>
+    <p><span class="k">consequence</span> The lock enforces the <em>ordering</em> — freeze first, then look — which a log alone cannot. One mechanism serves every pipeline in the stack.</p>
+  </div>
+
+  <div class="adr">
+    <div class="adr-head"><span class="adr-id">ADR-005</span><span class="adr-t">Missingness is classified and reported here; imputation happens downstream</span><span class="chip safe">accepted</span></div>
+    <p><span class="k">context</span> Imputing inside the harmonizer would produce one convenient artifact, and would bake an assumption into the canonical output that every consumer silently inherits.</p>
+    <p><span class="k">decision</span> §8.2 emits a per-cohort, per-variable class (systematic, near-systematic, sporadic, complete) and the heatmap. It imputes nothing.</p>
+    <p><span class="k">consequence</span> Consumers must choose a strategy and defend it. A systematically missing variable cannot be imputed within a cohort by accident, because the class says so in the output.</p>
+  </div>
+
+  <div class="adr">
+    <div class="adr-head"><span class="adr-id">ADR-006</span><span class="adr-t">A five-table CDM subset plus an extension, not full CDM conformance</span><span class="chip frozen">accepted</span></div>
+    <p><span class="k">context</span> Full OMOP conformance is a large ETL for a pipeline whose consumers need five tables and a set of derived endpoints. Forcing derived endpoints into <code>observation</code> would be nominally conformant and semantically wrong.</p>
+    <p><span class="k">decision</span> Emit <code>person</code>, <code>condition_occurrence</code>, <code>drug_exposure</code>, <code>measurement</code>, <code>observation</code>, plus <code>_extension/&lt;pack&gt;.parquet</code>. Never claim full conformance.</p>
+    <p><span class="k">consequence</span> OHDSI tooling works on the subset; the extension needs the pack to interpret. Revisit by ADR if the ETL outgrows one phase.</p>
+  </div>
+
+  <h3><span class="n">§15.1</span><span>Open questions, tagged with the phase that must resolve them</span></h3>
+  <div class="tw"><table>
+    <thead><tr><th>#</th><th>Question</th><th>Resolve by</th></tr></thead>
+    <tbody>
+      <tr><td>Q7</td><td>Does the <code>critical-care</code> pack ship full MIMIC-IV concept coverage, or only the subset the demo exercises?</td><td>phase 3</td></tr>
+      <tr><td>Q9</td><td>Are the pipeline repos public? <code>quarto publish gh-pages</code> on a private repo needs a paid plan, and a run report may carry cohort-level counts (see <code>report_include_counts</code>, §9.3).</td><td>first release phase</td></tr>
+      <tr><td>Q10</td><td>Does <code>frontier_max_subsets</code> enumeration hold at 30+ variables, or must §8.1 default to greedy and label its output approximate?</td><td>phase 3</td></tr>
+      <tr><td>Q11</td><td>Should the clerical review band (§3.3) become a second confirm-gate file, symmetrical with §5.1, rather than a report?</td><td>phase 1</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="s16">
+  <h2><span class="n">§16</span><span>Review log</span></h2>
+
+  <p class="lead">Appended pages from reading the real code, newest first. The schematic states
+  intent; a review states what happened. Neither overwrites the other.</p>
+
+  <div class="rev-empty">No reviews yet — <code>clinical-harmonize</code> has not been built.
+  The first review page belongs immediately after the phase-0 gate, when §1 and §2 exist in code.</div>
+
+  <h3><span class="n">§16.1</span><span>What a review page contains</span></h3>
+  <ul>
+    <li><strong>Drift table</strong> — every disagreement between code and this document, each
+        classified: <em>schematic stale</em> (update the section), <em>code wrong</em> (fix it), or
+        <em>deliberate divergence</em> (needs an ADR in §15).</li>
+    <li><strong>Invariant audit</strong> — §0 checked by reading, not by trusting CI. CI checks
+        what someone remembered to check.</li>
+    <li><strong>Defects visible only in code</strong> — a swallowed exception, a default
+        contradicting a test, a channel that drops rows on an empty optional, a TODO that became
+        load-bearing.</li>
+    <li><strong>Parallelisation and efficiency</strong> — ranked by expected wall-clock saved, each
+        with the measurement that would confirm it.</li>
+    <li><strong>Coverage</strong> — what could <em>not</em> be checked. A review implying more
+        coverage than it had is worse than a short one.</li>
+  </ul>
+</section>
+
+<footer>
+  <p><strong>p-harmonize schematic</strong> · rev 2026-08-13 (v1) · <code>docs/schematics/p-harmonize.html</code> · generated and maintained by the <code>schematic</code> skill. Every coding task in the plan cites a section number here; treat this as the reference you keep open beside the editor, not a document you read once.</p>
+</footer>
+
+</main>
+</div>
+</div>
