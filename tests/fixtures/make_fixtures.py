@@ -257,6 +257,111 @@ def matching_locked_model(target_dir: Path) -> Path:
     return path
 
 
+def invariant_fixture_tables(target_dir: Path) -> tuple[Path, Path, Path]:
+    """The §10.1 cohort set: two cohorts of DIFFERENT sizes, three datasets.
+
+    The harness keys on the concept pack's `outcome: true` flag, never on a
+    column name (§0), so this fixture's whole job is to carry a column that
+    the pack's outcome-flagged variable actually names --
+    `time_to_event` in assets/packs/minimal.yaml. Rename the pack variable
+    and rename these headers with it; that is the coupling the invariant is
+    supposed to have, and the only one.
+
+    Cohort sizes differ (20 vs 12 rows) deliberately: a permutation that
+    leaked ACROSS cohorts (the §10.1 Trap) would move values between two
+    differently-sized value sets and change each cohort's outcome marginal,
+    which the per-cohort marginal hash in tests/invariant/report.json then
+    catches.
+
+    COHORT_A/treatment carries NO outcome column on purpose. A cohort is
+    covered when ANY one of its datasets carries the outcome, so the
+    per-dataset probe must pass such a table through untouched rather than
+    treating "no outcome column here" as an error -- only a whole COHORT
+    with no outcome column anywhere is a defect, and that is a run-level
+    judgement, not a per-table one.
+
+    Every column is synthetic and domain-neutral (§10.3): no disease term,
+    no gene symbol, no cohort name that means anything.
+    """
+    tables_dir = target_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+
+    def clinical_rows(n: int, id_column: str, first_id: int) -> list[list[str]]:
+        header = [id_column, "AGE_AT_INDEX", "SEX", "VITAL_STATUS", "TIME_TO_EVENT"]
+        sexes = ["male", "female", "other", "unknown"]
+        statuses = ["alive", "dead", "unknown"]
+        rows = [header]
+        for i in range(n):
+            rows.append(
+                [
+                    str(first_id + i),
+                    str(30 + (i * 7) % 50),
+                    sexes[i % len(sexes)],
+                    statuses[i % len(statuses)],
+                    # n DISTINCT values, so a shuffle almost surely reorders
+                    # them: an outcome column of one repeated value would
+                    # make the permutation a silent no-op.
+                    str(round(10.0 + i * 3.5, 1)),
+                ]
+            )
+        return rows
+
+    a_clinical = tables_dir / "invariant_a_clinical.csv"
+    a_clinical.write_text("\n".join(",".join(r) for r in clinical_rows(20, "PATIENT_ID", 1)) + "\n")
+
+    b_clinical = tables_dir / "invariant_b_clinical.csv"
+    b_clinical.write_text("\n".join(",".join(r) for r in clinical_rows(12, "SUBJECT_ID", 101)) + "\n")
+
+    a_treatment = tables_dir / "invariant_a_treatment.csv"
+    treatment = [["PATIENT_ID", "EXPOSURE_COUNT", "EXPOSURE_START_DAY"]]
+    for i in range(20):
+        treatment.append([str(i + 1), str(1 + i % 3), str(i * 11)])
+    a_treatment.write_text("\n".join(",".join(r) for r in treatment) + "\n")
+
+    return a_clinical, a_treatment, b_clinical
+
+
+def invariant_samplesheet(target_dir: Path) -> Path:
+    """Points --input at the §10.1 cohort set. No holdout row: the harness
+    permutes what the proposer actually sees, and a held-out dataset is by
+    construction not that (§1.2)."""
+    a_clinical, a_treatment, b_clinical = invariant_fixture_tables(target_dir)
+    rows = [
+        "cohort_id,dataset_id,role,path,holdout",
+        f"COHORT_A,clinical,clinical,{a_clinical},false",
+        f"COHORT_A,treatment,treatment,{a_treatment},false",
+        f"COHORT_B,clinical,clinical,{b_clinical},false",
+    ]
+    path = target_dir / "invariant_samplesheet.csv"
+    path.write_text("\n".join(rows) + "\n")
+    return path
+
+
+def no_outcome_samplesheet(target_dir: Path) -> Path:
+    """A cohort set carrying no column the pack's outcome variable names.
+
+    The permutation is then a no-op on every table, so hash agreement across
+    seeds proves nothing at all -- the switched-off gate §10.1's Trap
+    describes, reached by accident instead of by edit. The harness has to
+    refuse to call such a run a proof, and this fixture is what proves it
+    does.
+    """
+    table = target_dir / "tables" / "no_outcome_clinical.csv"
+    table.parent.mkdir(parents=True, exist_ok=True)
+    rows = [["PATIENT_ID", "AGE_AT_INDEX", "SEX"]]
+    for i in range(12):
+        rows.append([str(i + 1), str(30 + i), ["male", "female"][i % 2]])
+    table.write_text("\n".join(",".join(r) for r in rows) + "\n")
+
+    sheet = [
+        "cohort_id,dataset_id,role,path,holdout",
+        f"COHORT_NO_OUTCOME,clinical,clinical,{table},false",
+    ]
+    path = target_dir / "no_outcome_samplesheet.csv"
+    path.write_text("\n".join(sheet) + "\n")
+    return path
+
+
 FIXTURES = [
     valid_samplesheet,
     duplicate_samplesheet,
@@ -267,6 +372,8 @@ FIXTURES = [
     matching_locked_model,
     profiling_samplesheet,
     encoding_samplesheet,
+    invariant_samplesheet,
+    no_outcome_samplesheet,
 ]
 
 

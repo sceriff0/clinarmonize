@@ -6,6 +6,18 @@
 include { INGEST; resolvePackPath; sha256Hex } from '../subworkflows/local/ingest'
 include { PROFILE_COLUMNS } from '../modules/local/profile_columns/main'
 include { MANIFEST_PROFILING_FAILURES } from '../modules/local/manifest_profiling_failures/main'
+include { PERMUTE_OUTCOME } from '../modules/local/permute_outcome/main'
+include { INVARIANT_REPORT } from '../modules/local/invariant_report/main'
+//
+// §10.1 — the permuted replicates are profiled by the SAME process as the
+// baseline, under an alias. An alias rather than a second module because
+// the harness only means anything if the permuted tables travel the
+// identical code path the real run uses; a purpose-built "profile for the
+// test" module is a path the invariant would not actually be tested on.
+// DSL2 permits one invocation per process name, and the baseline run still
+// needs its own, so the alias is what buys the second call site.
+//
+include { PROFILE_COLUMNS as PROFILE_COLUMNS_PERMUTED } from '../modules/local/profile_columns/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -212,6 +224,49 @@ def buildProfileParamsJson(
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    §10.1 — the outcome-permutation harness
+
+    Contract (docs/steps/s10-1.md):
+      for seed in 1..100:
+          permute outcome column WITHIN each cohort
+          run  --stop_after propose
+          collect sha256(ledger.proposed.yaml)
+      assert len(set(hashes)) == 1
+
+    The loop runs INSIDE one Nextflow execution rather than as a shell loop
+    around N of them: §14.2 requires this test on every push at 100
+    permutations, and 100 JVM startups is the difference between a test that
+    runs in CI and a test that gets moved to a nightly and then to nobody.
+    One run, N replicate branches, same arithmetic.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+//
+// --permute_outcome_seed is the card's "int or range": `7` arrives from the
+// CLI as an Integer and `1..100` as a String, so both are normalised here
+// into the one thing the rest of the harness wants -- the explicit list of
+// seeds to run. Unset (the default) yields an empty list, which is what
+// makes a normal run permute nothing at all.
+//
+def parseSeedSpec(seedSpec) {
+    if (seedSpec == null || seedSpec.toString().trim() == '') {
+        return []
+    }
+    def spec = seedSpec.toString().trim()
+    def matcher = (spec =~ /^(\d+)(?:\.\.(\d+))?$/)
+    if (!matcher.matches()) {
+        error("--permute_outcome_seed must be an integer (e.g. 7) or a range (e.g. 1..100); got '${spec}'.")
+    }
+    def low = matcher[0][1] as int
+    def high = matcher[0][2] != null ? matcher[0][2] as int : low
+    if (high < low) {
+        error("--permute_outcome_seed range '${spec}' ends before it starts.")
+    }
+    return (low..high) as List
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     PROCESSES
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
@@ -276,6 +331,9 @@ workflow CLINICALHARMONIZE {
     infer_unit_from_range  // boolean: add a low-confidence unit candidate from the value range (§2.2)
     max_failed_frac        // number:  failure-rate threshold above which the run refuses (§2.3)
     fail_sample_k          // int:     offending values carried into the failure manifest (§2.3)
+    permute_outcome_seed   // int|str: test-only seed or seed range for the §10.1 harness
+    invariant_n_permutations // int:   permutations required before a run counts as a proof (§10.1)
+    invariant_scope        // string:  stage the invariant claim is held over (§10.1, ADR-003)
     outdir                 // string:  output directory
 
     main:
@@ -321,9 +379,30 @@ workflow CLINICALHARMONIZE {
     if (!(targetStage in graph)) {
         error("Unknown stage '${targetStage}' for --stop_after.")
     }
+    //
+    // §10.1 — the invariant harness is the one caller allowed past the gate.
+    //
+    // The gate exists so a run cannot silently succeed as though an unbuilt
+    // stage had run. But the harness's measurement IS which contract output
+    // the unbuilt stages failed to produce, so refusing it here would
+    // replace the finding with the refusal: the test would fail because the
+    // gate said no, not because ledger.proposed.yaml was never written, and
+    // those are different facts about the pipeline. Nothing becomes silent
+    // by allowing it -- INVARIANT_REPORT names every replicate that
+    // produced no ledger and withholds the verdict 'proof'.
+    //
+    def seeds = parseSeedSpec(permute_outcome_seed)
+    def isInvariantRun = !seeds.isEmpty()
+
     def firstMissingStage = firstUnimplementedStage(graph)
-    if (firstMissingStage != null && graph.indexOf(targetStage) >= graph.indexOf(firstMissingStage)) {
+    if (!isInvariantRun && firstMissingStage != null && graph.indexOf(targetStage) >= graph.indexOf(firstMissingStage)) {
         requireStageImplemented(firstMissingStage)
+    }
+    if (isInvariantRun && graph.indexOf(targetStage) < graph.indexOf('profile')) {
+        error("--permute_outcome_seed needs a run that reaches at least 'profile'; --stop_after ${targetStage} stops before a permuted table is ever read, so the permutation could not affect anything.")
+    }
+    if (isInvariantRun && invariant_scope != 'propose') {
+        error("--invariant_scope '${invariant_scope}' is not implemented. ADR-003 scopes the harness to the proposer; widening it is a design change requiring a superseding ADR, not a config edit.")
     }
 
     //
@@ -345,18 +424,18 @@ workflow CLINICALHARMONIZE {
     // process in this phase to touch a table's bytes, so the seal must never
     // be re-derived or re-checked here.
     //
-    if (graph.indexOf(targetStage) >= graph.indexOf('profile')) {
-        def unitPatternsFile = file(resolvePackPath(unit_header_patterns))
-        def profileParamsJson = buildProfileParamsJson(
-            max_unique_listed,
-            date_formats,
-            example_k,
-            na_strings,
-            ucum_release,
-            infer_unit_from_range,
-            fail_sample_k,
-        )
+    def unitPatternsFile = file(resolvePackPath(unit_header_patterns))
+    def profileParamsJson = buildProfileParamsJson(
+        max_unique_listed,
+        date_formats,
+        example_k,
+        na_strings,
+        ucum_release,
+        infer_unit_from_range,
+        fail_sample_k,
+    )
 
+    if (graph.indexOf(targetStage) >= graph.indexOf('profile')) {
         PROFILE_COLUMNS(ch_open, unitPatternsFile, profileParamsJson)
         ch_versions = ch_versions.mix(PROFILE_COLUMNS.out.versions)
 
@@ -371,6 +450,69 @@ workflow CLINICALHARMONIZE {
             max_failed_frac,
         )
         ch_versions = ch_versions.mix(MANIFEST_PROFILING_FAILURES.out.versions)
+    }
+
+    //
+    // §10.1 — the harness proper. Runs alongside the baseline above, never
+    // instead of it: the permuted replicates are an extra measurement, and
+    // results/profiles/ plus the --max_failed_frac gate stay about the data
+    // the run was actually given.
+    //
+    if (isInvariantRun) {
+        PERMUTE_OUTCOME(ch_open, file(resolvePackPath(concept_pack)), seeds)
+        ch_versions = ch_versions.mix(PERMUTE_OUTCOME.out.versions.first())
+
+        //
+        // Re-key one dataset's N permuted tables into N independent channel
+        // items. The replicate id is read back off the filename PERMUTE_OUTCOME
+        // wrote it into: a process emits files, not structured records, so the
+        // name is the only channel through which a per-file attribute can
+        // cross that boundary. A file that does not match is a bug in this
+        // pair of files and nowhere else, so it fails here rather than
+        // silently profiling an unattributed replicate.
+        //
+        def ch_permuted = PERMUTE_OUTCOME.out.tables.flatMap { meta, tables ->
+            (tables instanceof List ? tables : [tables]).collect { permuted ->
+                def matcher = (permuted.name =~ /\.p(\d+)\.csv$/)
+                if (!matcher.find()) {
+                    error("PERMUTE_OUTCOME emitted '${permuted.name}', which carries no replicate id. Expected <cohort>.<dataset>.p<seed>.csv.")
+                }
+                [meta + [replicate: matcher.group(1) as int], permuted]
+            }
+        }
+
+        // The permuted bytes re-enter the real pipeline here, one task per
+        // (dataset, replicate), through the SAME profiling process the
+        // baseline uses. Not batched and not skipped: bin/profile_columns.py
+        // records example_values as the first k values in ROW ORDER, so a
+        // shuffle genuinely changes the outcome column's evidence record.
+        // A harness that reused the baseline profiles would be comparing a
+        // run against itself and would report 'no leak' forever.
+        PROFILE_COLUMNS_PERMUTED(ch_permuted, unitPatternsFile, profileParamsJson)
+        ch_versions = ch_versions.mix(PROFILE_COLUMNS_PERMUTED.out.versions.first())
+
+        //
+        // §4 does not exist yet, so no replicate produces a ledger and this
+        // channel is empty by construction. That emptiness is this task's
+        // deliverable: the harness runs end to end, hashes what it finds,
+        // finds nothing, and reports no-ledger. Task 5 replaces this one
+        // line with PROPOSE.out.ledger -- shaped [ val(replicate),
+        // path('ledger.proposed.yaml') ] -- and nothing else here changes.
+        //
+        def ch_ledgers = channel.empty()
+
+        INVARIANT_REPORT(
+            PERMUTE_OUTCOME.out.manifest.collect(),
+            // Hashed in Groovy rather than staged into the process: the
+            // ledgers all share one filename by contract, so staging 100 of
+            // them would force a rename that loses the only thing the
+            // report needs them keyed by -- which replicate produced which.
+            ch_ledgers.map { replicate, ledger -> "${replicate}=${sha256Hex(ledger.bytes)}" }.toSortedList(),
+            permute_outcome_seed.toString(),
+            invariant_n_permutations,
+            invariant_scope,
+        )
+        ch_versions = ch_versions.mix(INVARIANT_REPORT.out.versions)
     }
 
     emit:

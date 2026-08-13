@@ -150,6 +150,31 @@
                     "help_text": "Offending values carried into the manifest (§2.3).",
                     "fa_icon": "fas fa-vial"
                 },
+                "permute_outcome_seed": {
+                    "type": ["integer", "string"],
+                    "pattern": "^\\d+(\\.\\.\\d+)?$",
+                    "minimum": 0,
+                    "description": "Test-only. Permutes the outcome column within each cohort before the proposer runs.",
+                    "help_text": "test-only; permutes within cohort so marginals are preserved. A single integer (--permute_outcome_seed 7) runs one permuted replicate; a range (--permute_outcome_seed 1..100) runs one replicate per seed and writes tests/invariant/report.json (\u00a710.1). Unset means no permutation and no harness.",
+                    "fa_icon": "fas fa-random"
+                },
+                "invariant_n_permutations": {
+                    "type": "integer",
+                    "default": 100,
+                    "minimum": 10,
+                    "maximum": 10000,
+                    "description": "Permutations the invariant harness requires before it will call a run a proof.",
+                    "help_text": "CI uses 100; a release run uses more (\u00a710.1). A run whose --permute_outcome_seed range is shorter than this is reported as insufficient-permutations rather than as a proof, so the assertion cannot be weakened by shortening the range.",
+                    "fa_icon": "fas fa-redo"
+                },
+                "invariant_scope": {
+                    "type": "string",
+                    "default": "propose",
+                    "enum": ["propose", "map", "all"],
+                    "description": "Stage the invariant harness holds the outcome-blindness claim over.",
+                    "help_text": "widening it is a design change, not a config tweak (\u00a710.1, ADR-003). \u00a78.3's standardized-difference forest legitimately reads outcome variables for REPORTING, so an end-to-end scope would fail honestly and then get relaxed. Only 'propose' is implemented.",
+                    "fa_icon": "fas fa-crosshairs"
+                },
                 "generality_terms": {
                     "type": "string",
                     "default": "assets/forbidden_terms.txt",

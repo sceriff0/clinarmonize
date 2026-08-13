@@ -66,6 +66,9 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
         params.infer_unit_from_range,
         params.max_failed_frac,
         params.fail_sample_k,
+        params.permute_outcome_seed,
+        params.invariant_n_permutations,
+        params.invariant_scope,
         params.outdir,
     )
     emit:

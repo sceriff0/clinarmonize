@@ -1,0 +1,56 @@
+//
+// §10.1 — the harness's verdict: tests/invariant/report.json.
+//
+// Contract (docs/steps/s10-1.md):
+//   IN   every replicate's permutation manifest + every replicate's
+//        sha256(ledger.proposed.yaml)
+//   OUT  tests/invariant/report.json  {n_permutations, n_distinct_hashes}
+//   SIDE none
+//
+// A real process rather than a Groovy operator for the same reason
+// MANIFEST_PROFILING_FAILURES is one: whatever this reports has to surface
+// through the normal per-process stdout/stderr a run and an nf-test failure
+// both show, not through a dataflow thread nobody reads.
+//
+// This process always exits 0, including when the verdict is not `proof`.
+// The gate is the nf-test assertion (§14.2: the harness runs in CI on every
+// push), and a report that only exists when the news is good is a report
+// you cannot debug a red build with — the failing run is exactly the one
+// whose per-replicate hashes you need to read.
+//
+process INVARIANT_REPORT {
+    label 'process_single'
+
+    container "wave.seqera.io/wt/211e562aa32e/wave/build:duckdb-1.5.5_pyyaml-6.0.2--d70265250861aaf1@sha256:af953fd9ecb445cb0e62ecb3ca0427c2abb805feb0e7f3e9fd41982e9e03c756"
+
+    input:
+    path permutation_manifests, stageAs: 'permutations_in/*'
+    val  ledger_hashes
+    val  seed_spec
+    val  n_required
+    val  scope
+
+    output:
+    path "report.json",  emit: report
+    path "versions.yml", emit: versions
+
+    script:
+    // "<replicate>=<sha256>", one per replicate that produced a ledger.
+    // Empty until §4 exists, which is what makes the harness report
+    // no-ledger rather than a vacuous agreement across zero hashes.
+    def ledger_args = ledger_hashes.collect { "--ledger-hash '${it}'" }.join(' ')
+    """
+    invariant_report.py \\
+        --permutation-glob 'permutations_in/*.json' \\
+        --seed-spec '${seed_spec}' \\
+        --n-required ${n_required} \\
+        --scope '${scope}' \\
+        --out-report report.json \\
+        ${ledger_args}
+
+    cat <<-END_VERSIONS > versions.yml
+    "${task.process}":
+        python: \$(python3 --version | sed 's/Python //')
+    END_VERSIONS
+    """
+}
