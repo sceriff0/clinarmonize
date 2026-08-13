@@ -1,0 +1,16 @@
+# assets/forbidden_terms.txt — §10.3's generality grep list.
+#
+# Adding a term is cheap and should be routine (the card's own words); this
+# file is what --generality_terms points at by default. One term per line,
+# matched case-insensitively against --generality_paths. Not built into a
+# test in this phase (that is build-order item 14, §10.3, Task 11) — this
+# file and the generality_terms/generality_paths params exist now only so
+# that later test greps the right paths from day one, rather than inheriting
+# a default written before bin/ and subworkflows/ existed.
+melanoma
+nsclc
+carcinoma
+RECIST
+MS4A4A
+HARTWIG
+TCGA

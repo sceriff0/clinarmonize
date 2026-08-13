@@ -150,6 +150,23 @@
                     "help_text": "Offending values carried into the manifest (§2.3).",
                     "fa_icon": "fas fa-vial"
                 },
+                "generality_terms": {
+                    "type": "string",
+                    "default": "assets/forbidden_terms.txt",
+                    "description": "Path to the §10.3 generality grep's forbidden-term list.",
+                    "help_text": "The grep list; adding a term is cheap and should be routine (§10.3). Not yet enforced by a build step in this phase.",
+                    "fa_icon": "fas fa-list"
+                },
+                "generality_paths": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    },
+                    "default": ["modules/", "workflows/", "subworkflows/", "bin/"],
+                    "description": "Paths the §10.3 generality grep scans for disease terms; assets/ is deliberately excluded.",
+                    "help_text": "Where logic lives; assets/ is deliberately excluded (§10.3). Extended beyond the card's literal [modules/, workflows/] default to also cover subworkflows/ and bin/, which did not exist when that default was written and which is where most of this pipeline's own logic (Task 3's profiler included) actually sits — see task-3-report.md fix round 1, F2.",
+                    "fa_icon": "fas fa-folder-tree"
+                },
                 "email": {
                     "type": "string",
                     "description": "Email address for completion summary.",

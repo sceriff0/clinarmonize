@@ -114,7 +114,7 @@ def _classify(values: list[str], na_strings: list[str], date_formats: list[str])
         return {"failure_reason": "mixed_type", "offending": offending, "n_missing": n_missing}
 
     # No numeric/date-like hint anywhere: a legitimate free-text/categorical
-    # column (e.g. RECIST codes), not a failure.
+    # column (e.g. an ordinal code set), not a failure.
     return {"inferred_type": "str", "nonmissing": nonmissing, "n_missing": n_missing}
 
 

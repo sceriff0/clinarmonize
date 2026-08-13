@@ -26,17 +26,16 @@ process PROFILE_COLUMNS {
     tag "${meta.cohort_id}:${meta.dataset_id}"
     label 'process_single'
 
-    // python:3.12, the full (non-slim) Debian image (digest = the multi-arch
-    // manifest-list digest, valid on amd64 and arm64 alike) -- it, unlike
-    // -slim, ships procps, which Nextflow's own task wrapper requires for
-    // resource-metrics collection (trace.enabled=true) before this
-    // process's script ever runs, so installing procps mid-script is too
-    // late. duckdb/PyYAML are pinned by exact version and installed at task
-    // runtime rather than baked into the image: see task-3-report.md for
-    // why (no route to a container-build/publish service was available in
-    // the environment this was built in) and the exact pins this stands in
-    // for.
-    container "docker.io/library/python@sha256:dd4fe98ab39f91e936f8e7e7a65a3ce59ecfb11e32f9a125b3132779920ba7f7"
+    // A Wave-built image resolved from a conda spec ("duckdb=1.5.5
+    // pyyaml=6.0.2" against conda-forge+bioconda), not a base image plus a
+    // runtime install: duckdb/PyYAML are baked in, so the digest below
+    // actually covers what runs, not just what the container started as
+    // (the §11.2 Trap this stood in for prior to fix round 1 -- see
+    // task-3-report.md). It also ships bash, python3 and procps (ps),
+    // which Nextflow's own task wrapper requires for resource-metrics
+    // collection (trace.enabled=true) before this process's script ever
+    // runs.
+    container "wave.seqera.io/wt/211e562aa32e/wave/build:duckdb-1.5.5_pyyaml-6.0.2--d70265250861aaf1@sha256:af953fd9ecb445cb0e62ecb3ca0427c2abb805feb0e7f3e9fd41982e9e03c756"
 
     input:
     tuple val(meta), path(table)
@@ -51,13 +50,6 @@ process PROFILE_COLUMNS {
     script:
     prefix = "${meta.cohort_id}.${meta.dataset_id}"
     """
-    # docker.runOptions runs the container as the host uid:gid (see
-    # nextflow.config's docker profile), which cannot write the image's own
-    # (root-owned) site-packages -- install into the task's own (writable)
-    # work dir instead.
-    export PYTHONPATH="\$(pwd)/.pydeps"
-    pip install --quiet --no-cache-dir --target "\${PYTHONPATH}" 'duckdb==1.5.5' 'PyYAML==6.0.2'
-
     profile_columns.py \\
         --table '${table}' \\
         --cohort-id '${meta.cohort_id}' \\
