@@ -165,6 +165,20 @@ nextflow_pipeline {
 
     test("--unseal with a hash-matching lock admits the held-out row and logs it correctly (F2)") {
 
+        // matching_locked_model.json embeds the current git SHA (and this
+        // run's params_hash) at GENERATION time (tests/fixtures/make_fixtures.py).
+        // A fixture baked once therefore hash-mismatches after every later
+        // commit, and this test would redden on every new commit even
+        // though nothing about the seal itself changed -- a test that reds
+        // on every commit is a test someone eventually deletes, and this
+        // one guards the holdout seal. Regenerate it here, right before the
+        // test runs, so it always matches HEAD.
+        setup {
+            def proc = ["python3", "${baseDir}/tests/fixtures/make_fixtures.py".toString(), "${baseDir}/test_data/fixtures".toString()].execute()
+            proc.waitFor()
+            assert proc.exitValue() == 0: "failed to regenerate test_data/fixtures: ${proc.err.text}"
+        }
+
         when {
             params {
                 outdir       = "$outputDir"
