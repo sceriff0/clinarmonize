@@ -52,9 +52,11 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
         samplesheet,
         params.concept_pack,
         params.stop_after,
+        params.allow_single_dataset,
         params.unseal,
         params.locked_model,
         params.unseal_log,
+        params.params_hash_file,
         params.outdir,
     )
     emit:

@@ -142,6 +142,19 @@ def loadPack(String packPath) {
     return [hash, pack.variables]
 }
 
+//
+// alts seam (docs/steps/s1-1.md): SheetReader -- read(path) -> [(Meta, Path)]
+//
+// Today's only implementation parses samplesheet.csv via nf-schema's
+// samplesheetToList against assets/schema_input.json. The card's Alternatives
+// table names two swap candidates (a nested-YAML sheet; an OMOP-native
+// manifest) -- both would replace only this function's body. Nothing else in
+// INGEST, or in workflows/harmonize.nf, calls samplesheetToList directly.
+//
+def SheetReader_read(String path) {
+    return samplesheetToList(path, "${projectDir}/assets/schema_input.json")
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     SUBWORKFLOW
@@ -157,9 +170,7 @@ workflow INGEST {
     main:
     checkNoDuplicateDatasets(input)
 
-    def ch_datasets = channel.fromList(
-        samplesheetToList(input, "${projectDir}/assets/schema_input.json")
-    )
+    def ch_datasets = channel.fromList(SheetReader_read(input))
 
     def (pack_hash, pack_variables) = loadPack(concept_pack)
     def ch_pack = channel.value([pack_hash, pack_variables])

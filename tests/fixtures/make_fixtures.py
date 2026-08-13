@@ -14,11 +14,41 @@ Defaults to <repo_root>/test_data/fixtures (gitignored, like all of test_data/).
 """
 from __future__ import annotations
 
+import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 HOLDOUT_TIMESTAMP = "2026-08-13T00:00:00Z"
+
+# The dataset id -profile test's fixture (test_data/samplesheet.csv, built by
+# fetch_eunomia.py) marks holdout: true. Fixtures that need to hash-match a
+# real `-profile test` run use this id.
+DEFAULT_TEST_HELD_DATASET = "observation_period"
+
+
+def _current_git_sha() -> str:
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+
+def _params_hash(input_path: str, concept_pack_path: str, allow_single_dataset: bool = False) -> str:
+    """Mirrors computeParamsHash() in workflows/harmonize.nf exactly: same
+    three fields, same key names, same '\\n'-joined canonical form, same
+    lowercase boolean stringification. Any drift here is a drift there too --
+    if this stops matching a real pipeline run's params_hash.txt, the
+    algorithms have diverged and both sides need to change together."""
+    canonical = "\n".join(
+        [
+            f"input={input_path}",
+            f"concept_pack={concept_pack_path}",
+            f"allow_single_dataset={str(allow_single_dataset).lower()}",
+        ]
+    )
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def _write_table(target_dir: Path, name: str) -> Path:
@@ -89,11 +119,17 @@ def single_dataset_cohort_samplesheet(target_dir: Path) -> Path:
 
 
 def covering_locked_model(target_dir: Path, covers: list[str] | None = None) -> Path:
-    """A locked_model.json that covers the given dataset id(s) -- valid for --unseal."""
-    covers = covers or ["clinical"]
+    """A locked_model.json that covers the given dataset id(s) but carries a
+    deliberately fake params_hash/analysis_git_sha -- covers the F4 nogo:
+    "do not let --unseal proceed without a hash-matching lock". A lock that
+    exists, is valid JSON, and covers the right id must still refuse if it
+    does not hash-match the run about to use it. Defaults to covering
+    DEFAULT_TEST_HELD_DATASET so it's directly usable against -profile
+    test's fixture without an extra covers= argument."""
+    covers = covers or [DEFAULT_TEST_HELD_DATASET]
     lock = {
         "analysis_git_sha": "0" * 40,
-        "params_hash": "deadbeef",
+        "params_hash": "0" * 64,
         "locked_at": HOLDOUT_TIMESTAMP,
         "covers": covers,
     }
@@ -107,11 +143,33 @@ def noncovering_locked_model(target_dir: Path) -> Path:
     that will be requested with --unseal -- must still refuse."""
     lock = {
         "analysis_git_sha": "0" * 40,
-        "params_hash": "deadbeef",
+        "params_hash": "0" * 64,
         "locked_at": HOLDOUT_TIMESTAMP,
         "covers": ["some_other_dataset"],
     }
     path = target_dir / "noncovering_locked_model.json"
+    path.write_text(json.dumps(lock, indent=2) + "\n")
+    return path
+
+
+def matching_locked_model(target_dir: Path) -> Path:
+    """A locked_model.json that hash-matches a real `-profile test` run
+    exactly: same input (test_data/samplesheet.csv), same concept_pack
+    (assets/packs/minimal.yaml), same allow_single_dataset (false), and the
+    actual current git HEAD. Covers DEFAULT_TEST_HELD_DATASET, the dataset
+    -profile test's fixture marks holdout: true. This is the fixture that
+    proves the successful --unseal path actually admits a held-out row
+    (F2) -- covering_locked_model()'s fake hash cannot do that once F4's
+    hash check is enforced."""
+    input_path = str(REPO_ROOT / "test_data" / "samplesheet.csv")
+    concept_pack_path = str(REPO_ROOT / "assets" / "packs" / "minimal.yaml")
+    lock = {
+        "analysis_git_sha": _current_git_sha(),
+        "params_hash": _params_hash(input_path, concept_pack_path),
+        "locked_at": HOLDOUT_TIMESTAMP,
+        "covers": [DEFAULT_TEST_HELD_DATASET],
+    }
+    path = target_dir / "matching_locked_model.json"
     path.write_text(json.dumps(lock, indent=2) + "\n")
     return path
 
@@ -123,6 +181,7 @@ FIXTURES = [
     single_dataset_cohort_samplesheet,
     covering_locked_model,
     noncovering_locked_model,
+    matching_locked_model,
 ]
 
 

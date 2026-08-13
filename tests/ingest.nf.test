@@ -63,11 +63,21 @@ nextflow_pipeline {
 
         then {
             assert workflow.success
+            // The seal is a DAG property, not a post-hoc filter: assert on
+            // what was actually SUBMITTED as a task, not merely on output
+            // content. Content-only assertions cannot tell a sealed pipeline
+            // from one that filters *inside* STAGE_OPEN_DATASET after
+            // staging the held-out file anyway -- both would emit an
+            // identical manifest. Exactly 2 tasks (person, visit) must run;
+            // COHORT_GIBLEED_HELD/observation_period (holdout: true) must
+            // never be submitted at all.
+            def tags = workflow.trace.tasks()*.name
+            assert tags.size() == 2
+            assert tags.every { !it.contains('COHORT_GIBLEED_HELD') }
+            assert tags.any { it.contains('COHORT_GIBLEED:person') }
+            assert tags.any { it.contains('COHORT_GIBLEED:visit') }
+
             def manifest = new File("$outputDir/ingest/ingest_manifest.json").text
-            // COHORT_GIBLEED_HELD/observation_period is holdout: true and must
-            // never have been staged -- the seal is a DAG property, not a
-            // post-hoc filter, so it is absent from the manifest a real
-            // (staging) process wrote, not merely from a channel dump.
             assert !manifest.contains('COHORT_GIBLEED_HELD')
             assert manifest.contains('COHORT_GIBLEED')
         }
@@ -127,6 +137,65 @@ nextflow_pipeline {
             def stderr = (workflow.stdout + workflow.stderr).join('\n')
             assert stderr.contains('does not cover')
             assert stderr.contains('observation_period')
+        }
+    }
+
+    test("--unseal against a covering lock that does not hash-match still refuses (F4)") {
+
+        when {
+            params {
+                outdir       = "$outputDir"
+                stop_after   = "ingest"
+                unseal       = "observation_period"
+                locked_model = "$baseDir/test_data/fixtures/covering_locked_model.json"
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def stderr = (workflow.stdout + workflow.stderr).join('\n')
+            // covering_locked_model.json covers 'observation_period' but
+            // carries a deliberately fake params_hash/analysis_git_sha: the
+            // nogo ("do not let --unseal proceed without a hash-matching
+            // lock") means existence + covers alone must NOT be enough.
+            assert stderr.contains('does not hash-match')
+            assert workflow.trace.tasks().size() == 0
+        }
+    }
+
+    test("--unseal with a hash-matching lock admits the held-out row and logs it correctly (F2)") {
+
+        when {
+            params {
+                outdir       = "$outputDir"
+                stop_after   = "ingest"
+                unseal       = "observation_period"
+                locked_model = "$baseDir/test_data/fixtures/matching_locked_model.json"
+                unseal_log   = "$outputDir/unseal.log"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            // Admitted: the held-out row was actually staged (a DAG
+            // property, not just present in output content).
+            def tags = workflow.trace.tasks()*.name
+            assert tags.size() == 3
+            assert tags.any { it.contains('COHORT_GIBLEED_HELD:observation_period') }
+            def manifest = new File("$outputDir/ingest/ingest_manifest.json").text
+            assert manifest.contains('COHORT_GIBLEED_HELD')
+
+            // unseal_log's append format matches §1.2's Contract exactly:
+            // (timestamp, dataset_id, git_sha, params_hash), tab-separated.
+            def logLines = new File("$outputDir/unseal.log").readLines()
+            assert logLines.size() == 1
+            def fields = logLines[0].split('\t')
+            assert fields.size() == 4
+            assert fields[0] ==~ /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.*/ // timestamp (ISO-8601)
+            assert fields[1] == 'observation_period'                    // dataset_id
+            assert fields[2] ==~ /[0-9a-f]{40}/                          // analysis_git_sha
+            assert fields[3] ==~ /[0-9a-f]{64}/                          // params_hash
         }
     }
 }
