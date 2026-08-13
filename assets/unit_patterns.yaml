@@ -1,0 +1,50 @@
+# assets/unit_patterns.yaml — §2.2's UnitParser alts seam, the "a pattern
+# list" implementation: regexes that lift a candidate UCUM unit out of a
+# column header. Applied case-insensitively against the raw header string
+# (the header itself is never normalised in the stored record -- see
+# docs/steps/s2-1.md's nogo).
+#
+# Ambiguity is recorded, never resolved: a header can match more than one
+# pattern, and every hit is kept, ranked by confidence -- never collapsed to
+# a single guess (docs/steps/s2-2.md Trap).
+patterns:
+  - label: "(%)"
+    regex: '\(\s*%\s*\)|_pct$|_percent$'
+    ucum: "%"
+    confidence: 0.9
+  - label: "MONTHS"
+    regex: '(^|_)months?($|_)|_mo$'
+    ucum: "mo"
+    confidence: 0.9
+  - label: "DAYS"
+    regex: '(^|_)days?($|_)|_d$'
+    ucum: "d"
+    confidence: 0.9
+  - label: "WEEKS"
+    regex: '(^|_)weeks?($|_)|_wk$'
+    ucum: "wk"
+    confidence: 0.9
+  - label: "YEARS"
+    regex: '(^|_)years?($|_)|_yr$'
+    ucum: "a"
+    confidence: 0.9
+  - label: "mg/dL"
+    regex: 'mg[_/]?d[lL]'
+    ucum: "mg/dL"
+    confidence: 0.9
+  - label: "mmol/L"
+    regex: 'mmol[_/]?[lL]'
+    ucum: "mmol/L"
+    confidence: 0.9
+  - label: "kg"
+    regex: '(^|_)kgs?($|_)'
+    ucum: "kg"
+    confidence: 0.9
+  - label: "cm"
+    regex: '(^|_)cm($|_)'
+    ucum: "cm"
+    confidence: 0.9
+  - label: "bpm"
+    regex: 'bpm$'
+    ucum: "/min"
+    confidence: 0.9

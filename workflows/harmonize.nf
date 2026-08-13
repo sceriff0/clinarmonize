@@ -4,14 +4,17 @@
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 include { INGEST; resolvePackPath; sha256Hex } from '../subworkflows/local/ingest'
+include { PROFILE_COLUMNS } from '../modules/local/profile_columns/main'
+include { MANIFEST_PROFILING_FAILURES } from '../modules/local/manifest_profiling_failures/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     THE NINE-STAGE GRAPH (§0.9)
 
-    Only 'ingest' is implemented in this phase (Phase 0, Task 2). A run that
-    tries to reach any later stage fails with a clear message instead of
-    silently succeeding as if that stage had run.
+    Only 'ingest' (Phase 0, Task 2) and 'profile' (Phase 0, Task 3) are
+    implemented in this phase. A run that tries to reach any later stage
+    fails with a clear message instead of silently succeeding as if that
+    stage had run.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 def stageGraph() {
@@ -19,13 +22,23 @@ def stageGraph() {
 }
 
 def implementedStages() {
-    return ['ingest'] as Set
+    return ['ingest', 'profile'] as Set
 }
 
 def requireStageImplemented(String stage) {
     if (!(stage in implementedStages())) {
-        error("Stage '${stage}' is not implemented in this phase (Phase 0, Task 2 implements only 'ingest'). Re-run with --stop_after ingest.")
+        error("Stage '${stage}' is not implemented in this phase (Phase 0, Task 3 implements 'ingest' and 'profile'). Re-run with --stop_after profile.")
     }
+}
+
+//
+// The first stage in stageGraph() that implementedStages() does not cover,
+// or null if the whole graph is implemented. Used to decide, BEFORE any
+// process runs, whether --stop_after (or its default, the graph's last
+// stage) asks the run to reach further than this phase goes.
+//
+def firstUnimplementedStage(List graph) {
+    return graph.find { !(it in implementedStages()) }
 }
 
 /*
@@ -158,6 +171,47 @@ def HoldoutPolicy_admit(Map meta, Map lock) {
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    §2.1 / §2.2 / §2.3 — the profiler
+
+    Contract (docs/steps/s2-1.md, s2-2.md, s2-3.md): PROFILE_COLUMNS
+    (modules/local/profile_columns/main.nf) is the per-dataset half —
+    everything that is a pure function of one table's bytes. The
+    run-level half lives here: collating every dataset's failure manifest
+    into the single profiles/_failed.json the §2.3 contract names, and
+    enforcing its SIDE clause -- "exit non-zero when the failure RATE
+    exceeds --max_failed_frac" -- which is a property of the WHOLE run,
+    not of any one dataset.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+//
+// Serialises the profiling knobs PROFILE_COLUMNS needs into one JSON blob
+// passed as a single `val` input, rather than threading eight separate
+// process inputs (several of them lists) through Groovy-to-bash
+// interpolation.
+//
+def buildProfileParamsJson(
+    Integer maxUniqueListed,
+    List dateFormats,
+    Integer exampleK,
+    List naStrings,
+    String ucumRelease,
+    Boolean inferUnitFromRange,
+    Integer failSampleK
+) {
+    return groovy.json.JsonOutput.toJson([
+        max_unique_listed    : maxUniqueListed,
+        date_formats         : dateFormats,
+        example_k            : exampleK,
+        na_strings           : naStrings,
+        ucum_release         : ucumRelease,
+        infer_unit_from_range: inferUnitFromRange,
+        fail_sample_k        : failSampleK,
+    ])
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     PROCESSES
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
@@ -205,15 +259,24 @@ process STAGE_OPEN_DATASET {
 workflow CLINICALHARMONIZE {
 
     take:
-    input                // string:  path to the two-level samplesheet (--input)
-    concept_pack         // string:  path or URL to the concept pack (--concept_pack)
-    stop_after           // string?: stage after which the pipeline halts
-    allow_single_dataset // boolean: permits a cohort with one dataset (§3, not yet built)
-    unseal               // string:  comma-separated dataset id(s) admitted despite being held out (--unseal)
-    locked_model         // string:  path to locked_model.json, checked against --unseal
-    unseal_log           // string:  append-only audit trail for admitted holdouts
-    params_hash_file     // string:  path this run's params hash is recorded to
-    outdir               // string:  output directory
+    input                  // string:  path to the two-level samplesheet (--input)
+    concept_pack           // string:  path or URL to the concept pack (--concept_pack)
+    stop_after             // string?: stage after which the pipeline halts
+    allow_single_dataset   // boolean: permits a cohort with one dataset (§3, not yet built)
+    unseal                 // string:  comma-separated dataset id(s) admitted despite being held out (--unseal)
+    locked_model           // string:  path to locked_model.json, checked against --unseal
+    unseal_log             // string:  append-only audit trail for admitted holdouts
+    params_hash_file       // string:  path this run's params hash is recorded to
+    max_unique_listed      // int:     caps the stored unique-value set per column (§2.1)
+    date_formats           // list:    strftime formats that parse as a date (§2.1)
+    example_k              // int:     example values carried into the ledger (§2.1)
+    na_strings             // list:    values counted as missing (§2.1)
+    unit_header_patterns   // string:  path to the header unit-regex patterns (§2.2)
+    ucum_release           // string:  pinned UCUM grammar version, recorded only (§2.2)
+    infer_unit_from_range  // boolean: add a low-confidence unit candidate from the value range (§2.2)
+    max_failed_frac        // number:  failure-rate threshold above which the run refuses (§2.3)
+    fail_sample_k          // int:     offending values carried into the failure manifest (§2.3)
+    outdir                 // string:  output directory
 
     main:
     def ch_versions = channel.empty()
@@ -249,22 +312,24 @@ workflow CLINICALHARMONIZE {
     def ch_open = INGEST.out.datasets.filter { meta, _table -> HoldoutPolicy_admit(meta, lock) }
 
     //
-    // Stage gate. Everything past 'ingest' fails loudly in this phase
-    // rather than silently succeeding, and fails before any further work
-    // (including staging) happens.
+    // Stage gate. Everything past the last implemented stage fails loudly
+    // in this phase rather than silently succeeding, and fails before any
+    // further work (including staging) happens.
     //
     def graph = stageGraph()
     def targetStage = stop_after ?: graph.last()
     if (!(targetStage in graph)) {
         error("Unknown stage '${targetStage}' for --stop_after.")
     }
-    if (targetStage != 'ingest') {
-        requireStageImplemented(graph[graph.indexOf('ingest') + 1])
+    def firstMissingStage = firstUnimplementedStage(graph)
+    if (firstMissingStage != null && graph.indexOf(targetStage) >= graph.indexOf(firstMissingStage)) {
+        requireStageImplemented(firstMissingStage)
     }
 
     //
     // Stage the admitted datasets. This is the only place a table's bytes
-    // are ever staged in this phase; it only ever sees ch_open.
+    // are staged for the 'ingest' manifest in this phase; it only ever sees
+    // ch_open.
     //
     STAGE_OPEN_DATASET(ch_open)
     ch_versions = ch_versions.mix(STAGE_OPEN_DATASET.out.versions)
@@ -272,6 +337,41 @@ workflow CLINICALHARMONIZE {
     STAGE_OPEN_DATASET.out.manifest
         .map { meta, manifest -> manifest }
         .collectFile(name: 'ingest_manifest.json', storeDir: "${outdir}/ingest", newLine: true, sort: { it.name })
+
+    //
+    // §2.1 / §2.2 / §2.3 — profile every admitted dataset. Consumes ch_open
+    // directly: it is already the sealed, holdout-filtered channel (§1.2),
+    // and PROFILE_COLUMNS is the second (after STAGE_OPEN_DATASET) and last
+    // process in this phase to touch a table's bytes, so the seal must never
+    // be re-derived or re-checked here.
+    //
+    if (graph.indexOf(targetStage) >= graph.indexOf('profile')) {
+        def unitPatternsFile = file(resolvePackPath(unit_header_patterns))
+        def profileParamsJson = buildProfileParamsJson(
+            max_unique_listed,
+            date_formats,
+            example_k,
+            na_strings,
+            ucum_release,
+            infer_unit_from_range,
+            fail_sample_k,
+        )
+
+        PROFILE_COLUMNS(ch_open, unitPatternsFile, profileParamsJson)
+        ch_versions = ch_versions.mix(PROFILE_COLUMNS.out.versions)
+
+        // The run-level half of the §2.3 FailurePolicy seam: collates every
+        // dataset's failure manifest into profiles/_failed.json and refuses
+        // the run once the aggregate failure rate exceeds max_failed_frac.
+        // Needs every dataset's PROFILE_COLUMNS output collected first — a
+        // single dataset's failure rate is not the run's failure rate.
+        MANIFEST_PROFILING_FAILURES(
+            PROFILE_COLUMNS.out.profile.map { m, f -> f }.collect(),
+            PROFILE_COLUMNS.out.failed.map { m, f -> f }.collect(),
+            max_failed_frac,
+        )
+        ch_versions = ch_versions.mix(MANIFEST_PROFILING_FAILURES.out.versions)
+    }
 
     emit:
     datasets = ch_open           // channel: [ meta(cohort_id, dataset_id, role, holdout), path(table) ]

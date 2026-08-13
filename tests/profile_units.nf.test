@@ -1,0 +1,82 @@
+// §2.2 — normalise candidate units without committing to one.
+//
+// Fixtures: the profiling samplesheet from tests/fixtures/make_fixtures.py
+// points at a table with an OS_MONTHS column (0.0..60.0) -- a header that
+// says months over a range that also plausibly (if wrongly) reads as days.
+// Run once before this test:
+//
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/profile_units.nf.test --profile=+docker
+//
+nextflow_pipeline {
+
+    name "Normalise candidate units without committing to one"
+    script "../main.nf"
+    tag "pipeline"
+    tag "profile"
+    tag "units"
+
+    test("OS_MONTHS over a 0-60 range yields both a month and a low-confidence day candidate") {
+
+        when {
+            params {
+                outdir          = "$outputDir"
+                stop_after      = "profile"
+                input           = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                max_failed_frac = 0.5
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def profile = new groovy.json.JsonSlurper()
+                .parse(new File("$outputDir/profiles/COHORT_PROFILE.profile_test.json")) as List
+            def osMonths = profile.find { it.column == 'OS_MONTHS' }
+            assert osMonths != null
+
+            def candidates = osMonths.candidate_units as List
+            assert candidates.size() > 0
+
+            def monthCandidate = candidates.find { it.ucum == 'mo' }
+            def dayCandidate   = candidates.find { it.ucum == 'd' }
+
+            // Never just one: both a (header-derived, high-confidence) month
+            // candidate and a (range-derived, low-confidence) day candidate.
+            assert monthCandidate != null
+            assert dayCandidate != null
+            assert monthCandidate.confidence > dayCandidate.confidence
+            assert monthCandidate.source.startsWith('header:')
+            assert dayCandidate.source.startsWith('range:')
+
+            // §2.2 nogo: no value is ever converted -- the raw quantiles are
+            // still expressed in whatever the source column's numbers were,
+            // untouched by any unit candidate.
+            assert osMonths.quantiles[0] == 0.0
+            assert osMonths.quantiles[-1] == 60.0
+        }
+    }
+
+    test("a column with no parseable unit gets an empty candidate list, never a guessed default") {
+
+        when {
+            params {
+                outdir          = "$outputDir"
+                stop_after      = "profile"
+                max_failed_frac = 0.5
+            }
+        }
+
+        then {
+            assert workflow.success
+            def profile = new groovy.json.JsonSlurper()
+                .parse(new File("$outputDir/profiles/COHORT_GIBLEED.person.json")) as List
+            // PERSON_ID: a bare integer id, no unit-suggestive header text,
+            // and its range (arbitrary large ids) does not fit either of the
+            // range-inference bands.
+            def personId = profile.find { it.column == 'PERSON_ID' }
+            assert personId != null
+            assert personId.candidate_units == []
+        }
+    }
+}

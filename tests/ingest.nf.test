@@ -83,12 +83,14 @@ nextflow_pipeline {
         }
     }
 
-    test("a stage past ingest fails loudly instead of silently succeeding") {
+    test("a stage past profile fails loudly instead of silently succeeding") {
+        // 'profile' is now implemented (Task 3, s2-1/s2-2/s2-3); this
+        // exercises the next stage the graph doesn't yet cover.
 
         when {
             params {
                 outdir     = "$outputDir"
-                stop_after = "profile"
+                stop_after = "link"
             }
         }
 

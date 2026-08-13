@@ -57,6 +57,15 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
         params.locked_model,
         params.unseal_log,
         params.params_hash_file,
+        params.max_unique_listed,
+        params.date_formats,
+        params.example_k,
+        params.na_strings,
+        params.unit_header_patterns,
+        params.ucum_release,
+        params.infer_unit_from_range,
+        params.max_failed_frac,
+        params.fail_sample_k,
         params.outdir,
     )
     emit:

@@ -152,6 +152,89 @@ def noncovering_locked_model(target_dir: Path) -> Path:
     return path
 
 
+def profiling_fixture_table(target_dir: Path) -> Path:
+    """Synthetic table for §2.1/§2.2/§2.3's profiling tests. Every column
+    exercises a specific card requirement:
+
+      PATIENT_ID        -- plain int, one value per row (baseline "one
+                            record per column" sanity check).
+      OS_MONTHS          -- float, 0.0..60.0: the §2.2 Done-when fixture.
+                            The header says months; the range ALSO fits a
+                            plausible (if wrong) days reading, so a
+                            low-confidence day candidate must appear
+                            alongside the header's month candidate.
+      RESPONSE           -- a small, fixed vocabulary {CR,PR,SD,PD,NE}
+                            repeated across rows: the §2.1 Trap. Cardinality
+                            alone ("5 values") is not what identifies a
+                            RECIST column against a concept's value set --
+                            the SET {CR,PR,SD,PD,NE} is.
+      MIXED_COL          -- deliberately mixed numeric/text (4 of 20 values
+                            are "not_a_number"): the §2.3 Done-when fixture,
+                            a column that must appear in _failed.json with
+                            its raw sample while the run still succeeds.
+      ALL_MISSING_COL    -- every value is "" (a default na_string): the
+                            §2.3 Trap. This must be a SUCCESSFUL profile of
+                            an empty column (inferred_type "empty"), never a
+                            failure -- a later stage needs it
+                            present-but-empty to tell "never measured" from
+                            "no such column".
+    """
+    n = 20
+    responses = ["CR", "PR", "SD", "PD", "NE"]
+    header = ["PATIENT_ID", "OS_MONTHS", "RESPONSE", "MIXED_COL", "ALL_MISSING_COL"]
+    rows = [header]
+    for i in range(n):
+        os_months = round(i * 60 / (n - 1), 1)  # 0.0 .. 60.0
+        response = responses[i % len(responses)]
+        mixed = "not_a_number" if i % 5 == 0 else str(i)
+        rows.append([str(i + 1), str(os_months), response, mixed, ""])
+    path = target_dir / "tables" / "profiling_fixture.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(",".join(r) for r in rows) + "\n")
+    return path
+
+
+def profiling_samplesheet(target_dir: Path) -> Path:
+    """Points --input at profiling_fixture_table()'s single table."""
+    table = profiling_fixture_table(target_dir)
+    rows = [
+        "cohort_id,dataset_id,role,path,holdout",
+        f"COHORT_PROFILE,profile_test,clinical,{table},false",
+    ]
+    path = target_dir / "profiling_samplesheet.csv"
+    path.write_text("\n".join(rows) + "\n")
+    return path
+
+
+def encoding_fixture_table(target_dir: Path) -> Path:
+    """A table with one column (BAD_ENCODING) containing an invalid UTF-8
+    byte sequence in one cell -- §2.3's "encoding" failure reason. Written in
+    binary mode; the rest of the table is plain ASCII so only that column's
+    values are affected."""
+    path = target_dir / "tables" / "encoding_fixture.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rows = [
+        b"LABEL,BAD_ENCODING",
+        b"row1,ok",
+        b"row2,bad_\xff_byte",  # 0xFF is never valid UTF-8 on its own
+        b"row3,ok",
+    ]
+    path.write_bytes(b"\n".join(rows) + b"\n")
+    return path
+
+
+def encoding_samplesheet(target_dir: Path) -> Path:
+    """Points --input at encoding_fixture_table()'s single table."""
+    table = encoding_fixture_table(target_dir)
+    rows = [
+        "cohort_id,dataset_id,role,path,holdout",
+        f"COHORT_ENCODING,encoding_test,clinical,{table},false",
+    ]
+    path = target_dir / "encoding_samplesheet.csv"
+    path.write_text("\n".join(rows) + "\n")
+    return path
+
+
 def matching_locked_model(target_dir: Path) -> Path:
     """A locked_model.json that hash-matches a real `-profile test` run
     exactly: same input (test_data/samplesheet.csv), same concept_pack
@@ -182,6 +265,8 @@ FIXTURES = [
     covering_locked_model,
     noncovering_locked_model,
     matching_locked_model,
+    profiling_samplesheet,
+    encoding_samplesheet,
 ]
 
 

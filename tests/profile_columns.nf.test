@@ -1,0 +1,164 @@
+// §2.1 / §2.3 — profile every column into a typed evidence record; manifest
+// unprofilable columns instead of dropping them.
+//
+// Fixtures: `-profile test` (applied automatically via nf-test.config) points
+// params.input at test_data/samplesheet.csv (Eunomia GiBleed, via
+// tests/fixtures/fetch_eunomia.py). The synthetic profiling/encoding
+// samplesheets come from tests/fixtures/make_fixtures.py. Both must be run
+// once before this test:
+//
+//   python3 tests/fixtures/fetch_eunomia.py
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/profile_columns.nf.test --profile=+docker
+//
+nextflow_pipeline {
+
+    name "Profile every column into a typed evidence record"
+    script "../main.nf"
+    tag "pipeline"
+    tag "profile"
+
+    test("every column in the Eunomia fixture tables gets exactly one record, and _failed.json exists") {
+
+        when {
+            params {
+                outdir     = "$outputDir"
+                stop_after = "profile"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            // §2.1 Done when: every column has exactly one record. PERSON.csv
+            // has 18 columns; none of them are deliberately malformed, so
+            // every one should land in the success profile, none in
+            // _failed.json.
+            def personProfile = new groovy.json.JsonSlurper()
+                .parse(new File("$outputDir/profiles/COHORT_GIBLEED.person.json")) as List
+            def personHeader = new File("$baseDir/test_data/GiBleed/PERSON.csv").readLines()[0].split(',') as List
+            assert personProfile.size() == personHeader.size()
+            assert (personProfile*.column as Set) == (personHeader as Set)
+
+            // §2.1 Trap: the unique-value SET survives, not just cardinality.
+            def genderSourceValue = personProfile.find { it.column == 'GENDER_SOURCE_VALUE' }
+            assert genderSourceValue != null
+            assert genderSourceValue.unique_values.size() > 0
+            assert (genderSourceValue.unique_values as Set).every { it instanceof String }
+
+            // §2.3: the manifest exists even when nothing failed.
+            def failedFile = new File("$outputDir/profiles/_failed.json")
+            assert failedFile.exists()
+            def failed = new groovy.json.JsonSlurper().parse(failedFile) as List
+            assert failed.isEmpty()
+        }
+    }
+
+    test("a deliberately mixed-type column appears in _failed.json with its raw sample, and the run still succeeds") {
+
+        when {
+            params {
+                outdir           = "$outputDir"
+                stop_after       = "profile"
+                input            = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                max_failed_frac  = 0.5 // 1 of 5 columns fails (20%); default 0.05 would refuse the run
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def profile = new groovy.json.JsonSlurper()
+                .parse(new File("$outputDir/profiles/COHORT_PROFILE.profile_test.json")) as List
+            def failed = new groovy.json.JsonSlurper()
+                .parse(new File("$outputDir/profiles/_failed.json")) as List
+
+            // Every column appears in exactly one place: success xor failure.
+            def allColumns = ['PATIENT_ID', 'OS_MONTHS', 'RESPONSE', 'MIXED_COL', 'ALL_MISSING_COL']
+            assert (profile*.column + failed*.column).sort() == allColumns.sort()
+
+            def mixedFailure = failed.find { it.column == 'MIXED_COL' }
+            assert mixedFailure != null
+            assert mixedFailure.reason == 'mixed_type'
+            assert mixedFailure.cohort_id == 'COHORT_PROFILE'
+            assert mixedFailure.dataset_id == 'profile_test'
+            assert mixedFailure.sample.contains('not_a_number')
+
+            // §2.1 Trap, exercised directly: RESPONSE's unique-value SET
+            // survives, not just "5 values".
+            def response = profile.find { it.column == 'RESPONSE' }
+            assert (response.unique_values as Set) == (['CR', 'PR', 'SD', 'PD', 'NE'] as Set)
+            assert response.unique_truncated == false
+
+            // §2.3 Trap: all-missing is a SUCCESSFUL profile, never a failure.
+            def allMissing = profile.find { it.column == 'ALL_MISSING_COL' }
+            assert allMissing != null
+            assert allMissing.inferred_type == 'empty'
+            assert allMissing.n_missing == allMissing.n_rows
+            assert failed.find { it.column == 'ALL_MISSING_COL' } == null
+        }
+    }
+
+    test("the same mixed-type fixture refuses to run when the failure rate exceeds --max_failed_frac") {
+
+        when {
+            params {
+                outdir     = "$outputDir"
+                stop_after = "profile"
+                input      = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                // default max_failed_frac (0.05); 1/5 = 20% exceeds it
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def stderr = (workflow.stdout + workflow.stderr).join('\n')
+            assert stderr.contains('max_failed_frac')
+        }
+    }
+
+    test("a small max_unique_listed truncates the unique-value set explicitly") {
+
+        when {
+            params {
+                outdir             = "$outputDir"
+                stop_after         = "profile"
+                input              = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                max_failed_frac    = 0.5
+                max_unique_listed  = 2 // RESPONSE has 5 unique values
+            }
+        }
+
+        then {
+            assert workflow.success
+            def profile = new groovy.json.JsonSlurper()
+                .parse(new File("$outputDir/profiles/COHORT_PROFILE.profile_test.json")) as List
+            def response = profile.find { it.column == 'RESPONSE' }
+            // Absence of the set must never be readable as "few values".
+            assert response.unique_values == null
+            assert response.unique_truncated == true
+            assert response.n_unique == 5
+        }
+    }
+
+    test("a column with an invalid UTF-8 byte sequence appears in _failed.json with reason encoding") {
+
+        when {
+            params {
+                outdir           = "$outputDir"
+                stop_after       = "profile"
+                input            = "$baseDir/test_data/fixtures/encoding_samplesheet.csv"
+                max_failed_frac  = 0.5 // 1 of 2 columns fails (50%); default 0.05 would refuse the run
+            }
+        }
+
+        then {
+            assert workflow.success
+            def failed = new groovy.json.JsonSlurper()
+                .parse(new File("$outputDir/profiles/_failed.json")) as List
+            def badCol = failed.find { it.column == 'BAD_ENCODING' }
+            assert badCol != null
+            assert badCol.reason == 'encoding'
+        }
+    }
+}
