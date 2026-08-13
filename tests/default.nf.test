@@ -8,7 +8,11 @@ nextflow_pipeline {
 
         when {
             params {
-                outdir = "$outputDir"
+                outdir     = "$outputDir"
+                // Only 'ingest' is implemented in this phase (Task 2); a
+                // default run with no --stop_after tries to reach every
+                // stage and fails loudly by design (workflows/harmonize.nf).
+                stop_after = "ingest"
             }
         }
 
@@ -20,8 +24,6 @@ nextflow_pipeline {
             assert workflow.success
             assertAll(
                 { assert snapshot(
-                    // pipeline versions.yml file for multiqc from which Nextflow version is removed because we test pipelines on multiple Nextflow versions
-                    removeNextflowVersion("$outputDir/pipeline_info/clinicalharmonize_software_mqc_versions.yml"),
                     // All stable path name, with a relative path
                     stable_path,
                     // All files with stable contents

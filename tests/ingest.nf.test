@@ -1,0 +1,132 @@
+// §1.1 / §1.2 — ingest and the holdout seal.
+//
+// Fixtures: `-profile test` (applied automatically via nf-test.config) points
+// params.input at test_data/samplesheet.csv, produced by
+// tests/fixtures/fetch_eunomia.py. The duplicate/lock fixtures below come from
+// tests/fixtures/make_fixtures.py. Both must be run once before this test:
+//
+//   python3 tests/fixtures/fetch_eunomia.py
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/ingest.nf.test --profile=+docker
+//
+nextflow_pipeline {
+
+    name "Ingest and the holdout seal"
+    script "../main.nf"
+    tag "pipeline"
+    tag "ingest"
+
+    test("a duplicate (cohort_id, dataset_id) exits non-zero naming both rows") {
+
+        when {
+            params {
+                outdir       = "$outputDir"
+                stop_after   = "ingest"
+                input        = "$baseDir/test_data/fixtures/duplicate_samplesheet.csv"
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def stderr = (workflow.stdout + workflow.stderr).join('\n')
+            assert stderr.contains('COHORT_A')
+            assert stderr.contains('clinical')
+            assert stderr.contains('rows 2 and 3')
+        }
+    }
+
+    test("a sheet lacking the holdout column is rejected, not treated as false") {
+
+        when {
+            params {
+                outdir     = "$outputDir"
+                stop_after = "ingest"
+                input      = "$baseDir/test_data/fixtures/missing_holdout_column_samplesheet.csv"
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def stderr = (workflow.stdout + workflow.stderr).join('\n')
+            assert stderr.contains('holdout')
+        }
+    }
+
+    test("--stop_after ingest is reachable and the seal drops holdout rows before staging") {
+
+        when {
+            params {
+                outdir     = "$outputDir"
+                stop_after = "ingest"
+            }
+        }
+
+        then {
+            assert workflow.success
+            def manifest = new File("$outputDir/ingest/ingest_manifest.json").text
+            // COHORT_GIBLEED_HELD/observation_period is holdout: true and must
+            // never have been staged -- the seal is a DAG property, not a
+            // post-hoc filter, so it is absent from the manifest a real
+            // (staging) process wrote, not merely from a channel dump.
+            assert !manifest.contains('COHORT_GIBLEED_HELD')
+            assert manifest.contains('COHORT_GIBLEED')
+        }
+    }
+
+    test("a stage past ingest fails loudly instead of silently succeeding") {
+
+        when {
+            params {
+                outdir     = "$outputDir"
+                stop_after = "profile"
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def stderr = (workflow.stdout + workflow.stderr).join('\n')
+            assert stderr.contains('not implemented')
+        }
+    }
+
+    test("--unseal with no matching locked_model.json refuses to start and stages nothing") {
+
+        when {
+            params {
+                outdir       = "$outputDir"
+                stop_after   = "ingest"
+                unseal       = "observation_period"
+                locked_model = "$baseDir/test_data/fixtures/no_such_locked_model.json"
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def stderr = (workflow.stdout + workflow.stderr).join('\n')
+            assert stderr.contains('No held-out dataset was admitted')
+            // The trap: check that nothing was ever staged (no process ever
+            // ran at all -- the refusal happens before the DAG executes),
+            // not merely that nothing was in the output channel.
+            assert workflow.trace.tasks().size() == 0
+        }
+    }
+
+    test("--unseal against a lock that does not cover the requested id still refuses") {
+
+        when {
+            params {
+                outdir       = "$outputDir"
+                stop_after   = "ingest"
+                unseal       = "observation_period"
+                locked_model = "$baseDir/test_data/fixtures/noncovering_locked_model.json"
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def stderr = (workflow.stdout + workflow.stderr).join('\n')
+            assert stderr.contains('does not cover')
+            assert stderr.contains('observation_period')
+        }
+    }
+}

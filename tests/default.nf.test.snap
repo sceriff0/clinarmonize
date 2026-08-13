@@ -1,0 +1,24 @@
+{
+    "-profile test": {
+        "content": [
+            [
+                "ingest",
+                "ingest/ingest_manifest.json",
+                "pipeline_info",
+                "stage",
+                "stage/COHORT_GIBLEED__person.manifest.json",
+                "stage/COHORT_GIBLEED__visit.manifest.json"
+            ],
+            [
+                "ingest_manifest.json:md5,9ad8a213f6a86980576963426c621ee2",
+                "COHORT_GIBLEED__person.manifest.json:md5,dee594098d0bef5f25985c033ef6995e",
+                "COHORT_GIBLEED__visit.manifest.json:md5,546d76d2670102daedc3a29935fbe8c6"
+            ]
+        ],
+        "timestamp": "2026-08-13T19:59:42.729955",
+        "meta": {
+            "nf-test": "0.9.5",
+            "nextflow": "26.04.6"
+        }
+    }
+}

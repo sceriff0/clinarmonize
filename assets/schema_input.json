@@ -2,32 +2,42 @@
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://raw.githubusercontent.com/clinarmonize/clinicalharmonize/master/assets/schema_input.json",
     "title": "clinarmonize/clinicalharmonize pipeline - params.input schema",
-    "description": "Schema for the file provided with params.input",
+    "description": "Schema for the two-level (cohort, dataset) samplesheet provided with params.input. A cohort holds many datasets; (cohort_id, dataset_id) is the primary key, not cohort_id alone (see §1.1 Trap). Duplicate-key detection deliberately lives outside this schema, in subworkflows/local/ingest, so the failure names both offending rows -- nf-schema's own `uniqueEntries` only names one.",
     "type": "array",
     "items": {
         "type": "object",
         "properties": {
-            "sample": {
+            "cohort_id": {
                 "type": "string",
                 "pattern": "^\\S+$",
-                "errorMessage": "Sample name must be provided and cannot contain spaces",
-                "meta": ["id"]
+                "errorMessage": "cohort_id must be provided and cannot contain spaces",
+                "meta": ["cohort_id"]
             },
-            "fastq_1": {
+            "dataset_id": {
+                "type": "string",
+                "pattern": "^\\S+$",
+                "errorMessage": "dataset_id must be provided and cannot contain spaces",
+                "meta": ["dataset_id"]
+            },
+            "role": {
+                "type": "string",
+                "enum": ["clinical", "treatment", "biopsy", "imaging", "other"],
+                "errorMessage": "role must be one of: clinical, treatment, biopsy, imaging, other. It is declared here, never inferred from the file name.",
+                "meta": ["role"]
+            },
+            "path": {
                 "type": "string",
                 "format": "file-path",
                 "exists": true,
-                "pattern": "^([\\S\\s]*\\/)?[^\\s\\/]+\\.f(ast)?q\\.gz$",
-                "errorMessage": "FastQ file for reads 1 must be provided, cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+                "pattern": "^\\S+$",
+                "errorMessage": "path must point to an existing file"
             },
-            "fastq_2": {
-                "type": "string",
-                "format": "file-path",
-                "exists": true,
-                "pattern": "^([\\S\\s]*\\/)?[^\\s\\/]+\\.f(ast)?q\\.gz$",
-                "errorMessage": "FastQ file for reads 2 cannot contain spaces and must have extension '.fq.gz' or '.fastq.gz'"
+            "holdout": {
+                "type": "boolean",
+                "errorMessage": "holdout must be provided as true or false. A sheet lacking this column is rejected; absent is not false.",
+                "meta": ["holdout"]
             }
         },
-        "required": ["sample", "fastq_1"]
+        "required": ["cohort_id", "dataset_id", "role", "path", "holdout"]
     }
 }

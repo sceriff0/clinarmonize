@@ -45,6 +45,34 @@
                     "help_text": "The complete nine-stage graph (§0.9). A stage not yet implemented in this phase fails with a clear \"not implemented in this phase\" message — it never silently succeeds.",
                     "fa_icon": "fas fa-hand"
                 },
+                "allow_single_dataset": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Permit a cohort with a single dataset.",
+                    "help_text": "Permits a cohort with one dataset (skips §3 entirely for it).",
+                    "fa_icon": "fas fa-user"
+                },
+                "unseal": {
+                    "type": "string",
+                    "default": "",
+                    "description": "Comma-separated dataset id(s) to admit despite being held out.",
+                    "help_text": "Admits named held-out datasets; refuses without a matching lock. Comma-separated, e.g. --unseal dataset_a,dataset_b (list of dataset_id).",
+                    "fa_icon": "fas fa-unlock"
+                },
+                "locked_model": {
+                    "type": "string",
+                    "default": "locked_model.json",
+                    "description": "The lock --unseal is checked against.",
+                    "help_text": "The lock --unseal is checked against. Required IFF --unseal is non-empty: the run refuses to start when this file is missing, or when it does not cover every dataset id named by --unseal.",
+                    "fa_icon": "fas fa-lock"
+                },
+                "unseal_log": {
+                    "type": "string",
+                    "default": "unseal.log",
+                    "description": "Append-only audit trail for admitted holdout datasets.",
+                    "help_text": "Append-only audit trail: (timestamp, dataset_id, git_sha, params_hash) is appended every time --unseal successfully admits a dataset.",
+                    "fa_icon": "fas fa-file-alt"
+                },
                 "email": {
                     "type": "string",
                     "description": "Email address for completion summary.",
@@ -243,6 +271,14 @@
                     "fa_icon": "far fa-check-circle",
                     "description": "Base URL or local path to location of pipeline test dataset files",
                     "default": "https://raw.githubusercontent.com/nf-core/test-datasets/",
+                    "hidden": true
+                },
+                "test_data_base": {
+                    "type": "string",
+                    "fa_icon": "far fa-check-circle",
+                    "description": "Base URL for OMOP-shaped test fixtures (Eunomia).",
+                    "help_text": "nf-core/test-datasets has no OMOP branch (Ruling R6), so -profile test's fixtures come from OHDSI/EunomiaDatasets at this base URL instead, fetched at runtime by tests/fixtures/fetch_eunomia.py into a gitignored test_data/.",
+                    "default": "https://raw.githubusercontent.com/OHDSI/EunomiaDatasets/main/datasets",
                     "hidden": true
                 },
                 "trace_report_suffix": {

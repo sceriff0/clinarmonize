@@ -1,0 +1,104 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://raw.githubusercontent.com/clinarmonize/clinicalharmonize/master/assets/schema_pack.json",
+    "title": "clinarmonize/clinicalharmonize concept pack schema",
+    "description": "Schema for a concept pack (assets/packs/<name>.yaml). The pack IS the target variable set: everything the pipeline can ever produce a candidate mapping for is declared here, nowhere else.",
+    "type": "object",
+    "required": ["pack", "version", "vocabulary", "variables"],
+    "additionalProperties": false,
+    "properties": {
+        "pack": {
+            "type": "string",
+            "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+            "description": "Short, machine-safe pack identifier (lowercase, hyphen-separated)."
+        },
+        "version": {
+            "type": "string",
+            "pattern": "^\\d+\\.\\d+\\.\\d+$",
+            "description": "Semantic version of the pack."
+        },
+        "vocabulary": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Pinned vocabulary release the pack's concept_ids resolve against. This string is hashed as part of the pack's identity."
+        },
+        "variables": {
+            "type": "array",
+            "minItems": 1,
+            "contains": {
+                "type": "object",
+                "properties": {
+                    "outcome": {
+                        "const": true
+                    }
+                },
+                "required": ["outcome"]
+            },
+            "description": "The target variable set. At least one variable MUST be flagged outcome: true (§0 the invariant): that flag, and only that flag, is what 'the outcome variable' means anywhere in this pipeline.",
+            "items": {
+                "type": "object",
+                "required": ["name", "domain"],
+                "additionalProperties": false,
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]*$",
+                        "description": "Target variable name, used as the column name downstream."
+                    },
+                    "domain": {
+                        "type": "string",
+                        "enum": ["person", "observation", "measurement", "condition", "drug", "procedure", "device", "derived"],
+                        "description": "The OMOP-shaped domain the variable is drawn from, or 'derived' for a variable computed from other domains (e.g. a survival time)."
+                    },
+                    "concept_id": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Standard OMOP concept id this variable denotes. 0 is the standard OMOP 'unmapped' placeholder. Required unless domain is 'derived'."
+                    },
+                    "type": {
+                        "type": "string",
+                        "enum": ["continuous", "nominal", "ordinal", "boolean"],
+                        "description": "Statistical type of the variable. Required unless domain is 'derived'."
+                    },
+                    "domain_values": {
+                        "type": "array",
+                        "minItems": 1,
+                        "description": "Enumerated legal values, for nominal/ordinal variables."
+                    },
+                    "derivation": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]*$",
+                        "description": "Name of the derivation rule that computes this variable. Required when domain is 'derived'."
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "Unit the derived/continuous variable is expressed in."
+                    },
+                    "outcome": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "The invariant flag (§0). true means this variable IS the outcome, and per the invariant, no harmonization decision anywhere in the pipeline may ever be a function of it. Never inferred from a name; always this flag."
+                    }
+                },
+                "allOf": [
+                    {
+                        "if": {
+                            "properties": {
+                                "domain": {
+                                    "const": "derived"
+                                }
+                            },
+                            "required": ["domain"]
+                        },
+                        "then": {
+                            "required": ["derivation"]
+                        },
+                        "else": {
+                            "required": ["concept_id", "type"]
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}

@@ -41,7 +41,7 @@ params.fasta = getGenomeAttribute('fasta')
 workflow CLINARMONIZE_CLINICALHARMONIZE {
 
     take:
-    samplesheet // channel: samplesheet read in from --input
+    samplesheet // string: path to the two-level samplesheet read in from --input
 
     main:
 
@@ -50,13 +50,16 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
     //
     CLINICALHARMONIZE (
         samplesheet,
-        params.multiqc_config,
-        params.multiqc_logo,
-        params.multiqc_methods_description,
+        params.concept_pack,
+        params.stop_after,
+        params.unseal,
+        params.locked_model,
+        params.unseal_log,
         params.outdir,
     )
     emit:
-    multiqc_report = CLINICALHARMONIZE.out.multiqc_report // channel: /path/to/multiqc_report.html
+    datasets = CLINICALHARMONIZE.out.datasets // channel: [ meta(cohort_id, dataset_id, role, holdout), path(table) ]
+    pack     = CLINICALHARMONIZE.out.pack     // channel: [ pack_hash, [variable, ...] ]
 }
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -85,8 +88,12 @@ workflow {
     //
     // WORKFLOW: Run main workflow
     //
+    // params.input is passed directly (not via PIPELINE_INITIALISATION.out.samplesheet):
+    // that output is itself a channel-wrapped value once emitted, and §1.1's ingest
+    // needs the plain path string to read+validate the samplesheet itself.
+    //
     CLINARMONIZE_CLINICALHARMONIZE (
-        PIPELINE_INITIALISATION.out.samplesheet
+        params.input
     )
     //
     // SUBWORKFLOW: Run completion tasks
@@ -97,7 +104,7 @@ workflow {
         params.plaintext_email,
         params.outdir,
         params.monochrome_logs,
-        CLINARMONIZE_CLINICALHARMONIZE.out.multiqc_report
+        channel.empty() // no MultiQC in this phase; kept for interface compatibility with PIPELINE_COMPLETION
     )
 }
 

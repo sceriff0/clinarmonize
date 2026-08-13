@@ -1,0 +1,28 @@
+# assets/packs/minimal.yaml — the pack IS the target variable set
+#
+# Smallest sensible generic pack: enough variables to exercise every domain
+# kind (person, observation, derived) and the outcome flag, with no disease
+# term, gene symbol, or cohort name anywhere in it (§10.3 generality).
+pack: minimal-generic
+version: 0.1.0
+vocabulary: athena-2026-08 # pinned release; hashed
+variables:
+  - name: age_at_index
+    domain: person
+    concept_id: 0
+    type: continuous
+  - name: sex
+    domain: person
+    concept_id: 0
+    type: nominal
+    domain_values: [male, female, other, unknown]
+  - name: vital_status
+    domain: observation
+    concept_id: 0
+    type: nominal
+    domain_values: [alive, dead, unknown]
+  - name: time_to_event
+    domain: derived
+    derivation: survival_time
+    unit: day
+    outcome: true # excluded from EVERY channel
