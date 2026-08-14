@@ -71,6 +71,22 @@ nextflow_pipeline {
             // verdict too, so the failure message names WHY rather than
             // leaving a bare 0 != 1 to be interpreted.
             assert report.verdict == "proof"
+
+            // Fix round 1 (Important #1): verdict: 'no-ledger' only fires on
+            // ZERO hashes -- 101 replicates of an EMPTY ledger.proposed.yaml
+            // would hash identically too and still report 'proof'. Today's
+            // non-emptiness rests on a coincidence between the invariant
+            // fixture's columns and assets/packs/minimal.yaml's variables
+            // that no earlier assertion here defended; read the published
+            // baseline ledger directly and require at least one real
+            // proposal, so changing either the fixture or the pack in a way
+            // that empties the ledger fails HERE, loudly, instead of leaving
+            // this the headline gate a silent tautology.
+            def ledger = new org.yaml.snakeyaml.Yaml().load(new File("$outputDir/ledger.proposed.yaml").text) as List
+            assert ledger.size() > 0
+            def allProposals = ledger.collectMany { it.proposals }
+            assert allProposals.size() > 0
+            assert allProposals.every { it.variable != null && it.total != null }
         }
     }
 

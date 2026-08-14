@@ -1,0 +1,180 @@
+// §10.1 — the negative control: does the harness actually go RED when the
+// outcome column genuinely leaks into a channel?
+//
+// docs/steps/s10-1.md's own done-when has TWO clauses:
+//   "100 permutations yield one hash; deliberately wiring the outcome into
+//    a channel makes the test fail."
+// tests/invariant.nf.test only ever demonstrates the first. This file
+// demonstrates the second -- the harness's SENSITIVITY, not just its
+// specificity. Without this, "the gate is on" was argued from code reading,
+// never observed.
+//
+// Mechanism (temporary sabotage, applied and reverted by THIS test's own
+// setup{}/cleanup{} -- never touches a normal run):
+//   setup{} reads bin/propose_channels.py, inserts a block that monkeypatches
+//   EvidenceChannel_score so every channel's score is perturbed by a hash of
+//   the PROFILE belonging to whichever column's name matches an
+//   outcome-flagged pack variable (the same normalisation
+//   score_name_similarity already uses) -- i.e. the outcome column's own
+//   profile bytes, in ROW ORDER, which PERMUTE_OUTCOME shuffles per seed.
+//   That is "wiring the outcome into a channel", built the same way §4.2's
+//   own channels are: a pure function of a ColumnProfile.
+//   cleanup{} restores the original file byte-for-byte. nf-test's
+//   TestExecutionEngine calls ITest.cleanup() in a try/finally around
+//   execute() (verified against the nf-test 0.9.5 jar's bytecode before
+//   relying on it), so the restore runs even if an assertion below fails.
+//
+// This is a genuinely temporary, test-local mutation of a real source file
+// on disk -- unusual for this repo. It is the only way to prove the harness
+// catches a REAL leak through the REAL pipeline (INVARIANT_REPORT, the
+// hashing, the stage gate) rather than a mocked one. A production "leak
+// mode" toggle was deliberately NOT added: nothing in bin/, modules/,
+// workflows/ or the schema changes; --enabled_channels' enum is untouched;
+// a real `nextflow run .` can never reach this code path because the code
+// does not exist except for the few seconds this one test's process runs.
+
+nextflow_pipeline {
+
+    name "The outcome-permutation harness's negative control"
+    script "../main.nf"
+    tag "pipeline"
+    tag "invariant"
+
+    test("deliberately wiring the outcome column's profile into every channel's score makes the harness report a leak, not a proof") {
+
+        def proposeChannelsFile
+        def originalProposeChannelsText
+
+        setup {
+            new File("${baseDir}/tests/invariant/report.json").delete()
+
+            proposeChannelsFile = new File("${baseDir}/bin/propose_channels.py")
+            originalProposeChannelsText = proposeChannelsFile.text
+
+            def marker = 'if __name__ == "__main__":'
+            assert originalProposeChannelsText.contains(marker) : 'bin/propose_channels.py no longer carries the expected anchor line -- update this test\'s insertion point.'
+
+            def sabotage = '''
+# ============================================================================
+# TEST-ONLY NEGATIVE CONTROL -- tests/invariant_leak_control.nf.test
+# Injected by that test's own setup{}, removed by its cleanup{}. Never
+# present outside that one test's process lifetime; never reachable from a
+# normal `nextflow run .`.
+#
+# Monkeypatches EvidenceChannel_score so every channel's score becomes a
+# function of the outcome-flagged variable's own column profile (found by
+# the SAME normalised-name match score_name_similarity uses). PERMUTE_OUTCOME
+# shuffles that column's row order per seed, so this hash -- and therefore
+# every ledger byte -- becomes a genuine function of the outcome column.
+# ============================================================================
+import glob as _sabotage_glob
+import hashlib as _sabotage_hashlib
+
+
+def _sabotage_argv_value(flag):
+    argv = sys.argv
+    for i, a in enumerate(argv):
+        if a == flag and i + 1 < len(argv):
+            return argv[i + 1]
+    return None
+
+
+def _sabotage_outcome_hash():
+    profile_glob = _sabotage_argv_value("--profile-glob")
+    pack_variables_arg = _sabotage_argv_value("--pack-variables")
+    if not profile_glob or not pack_variables_arg:
+        return None
+    variables = json.loads(pack_variables_arg)
+    outcome_names = {_normalize_name(v["name"]) for v in variables if v.get("outcome")}
+    if not outcome_names:
+        return None
+    for path in sorted(_sabotage_glob.glob(profile_glob)):
+        with open(path, encoding="utf-8") as fh:
+            profiles = json.load(fh)
+        for p in profiles:
+            if _normalize_name(p["column"]) in outcome_names:
+                blob = json.dumps(p, sort_keys=True).encode("utf-8")
+                return int(_sabotage_hashlib.sha256(blob).hexdigest(), 16)
+    return None
+
+
+_SABOTAGE_OUTCOME_HASH = _sabotage_outcome_hash()
+_SABOTAGE_ORIGINAL_SCORE = EvidenceChannel_score
+
+
+def EvidenceChannel_score(channel_id, column_profile, variable, params):
+    score, detail = _SABOTAGE_ORIGINAL_SCORE(channel_id, column_profile, variable, params)
+    if score is not None and _SABOTAGE_OUTCOME_HASH is not None:
+        # REPLACE, not perturb-and-clamp: several of this fixture's channels
+        # (exact normalised name matches, matching declared types) already
+        # score a real 1.0 before sabotage, so an additive perturbation
+        # clamped to [0, 1] gets silently absorbed at the ceiling and every
+        # replicate looks identical again -- a false negative discovered
+        # empirically (first attempt: n_distinct_hashes stayed 1). Replacing
+        # the score outright with a value drawn from the outcome profile's
+        # own hash cannot be absorbed this way.
+        score = (_SABOTAGE_OUTCOME_HASH % 10000) / 10000.0
+        detail = dict(detail)
+        detail["_test_only_sabotage"] = "score replaced by a hash of the outcome column's own profile (negative control)"
+    return score, detail
+# ============================================================================
+# END TEST-ONLY NEGATIVE CONTROL
+# ============================================================================
+
+'''
+
+            proposeChannelsFile.text = originalProposeChannelsText.replace(marker, sabotage + marker)
+        }
+
+        when {
+            params {
+                outdir                    = "$outputDir"
+                stop_after                = "propose"
+                input                     = "$baseDir/test_data/fixtures/invariant_samplesheet.csv"
+                permute_outcome_seed      = "1..10"
+                // Matches the seed count above (the schema's own minimum for
+                // invariant_n_permutations -- §11.1 -- is 10): this control
+                // only needs to observe a hash split, not reproduce the full
+                // 100-seed CI claim (that is tests/invariant.nf.test's job).
+                // Left at the default 100, n_permutations(10) < n_required(100)
+                // would report 'insufficient-permutations' before ever
+                // reaching the hash-count branch, hiding the very thing this
+                // test exists to observe.
+                invariant_n_permutations = 10
+                max_failed_frac          = 0.5
+            }
+        }
+
+        then {
+            // The run itself must still SUCCEED -- the sabotage perturbs
+            // scores, it does not corrupt evidence.parquet's schema or crash
+            // any process. A workflow failure here would be a different bug,
+            // not the leak this test is built to observe.
+            assert workflow.success
+
+            def report = new groovy.json.JsonSlurper()
+                .parse(new File("$baseDir/tests/invariant/report.json"))
+
+            // The harness ran for real: every replicate covered, no
+            // no-op/incomplete/marginal-moved confound that would make a
+            // hash split (or agreement) mean nothing.
+            assert report.n_permutations == 10
+            assert report.cohorts_without_outcome_column == []
+            assert report.cohorts_with_incomplete_replicates == [:]
+            assert report.marginal_moved == []
+            assert report.no_op_permutations == []
+
+            // The actual negative-control assertion: a real, deliberate
+            // dependency on the outcome column produces MORE than one
+            // distinct ledger hash across replicates, and the harness names
+            // it 'leak', not 'proof' -- s10-1's second done-when clause,
+            // observed for the first time in this repo.
+            assert report.n_distinct_hashes > 1
+            assert report.verdict == 'leak'
+        }
+
+        cleanup {
+            proposeChannelsFile.text = originalProposeChannelsText
+        }
+    }
+}
