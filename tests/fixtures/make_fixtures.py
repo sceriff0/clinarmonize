@@ -519,6 +519,193 @@ def propose_cap_samplesheet(target_dir: Path) -> Path:
     return path
 
 
+def confirm_ledger_valid(target_dir: Path) -> Path:
+    """§5.1's own fixture (tests/confirm_ledger.nf.test): a valid
+    ledger.confirmed.yaml row against profiling_samplesheet()'s fixture pair
+    (profiling_fixture_table() + assets/packs/propose_channels_fixture.yaml),
+    whose one real proposal is COHORT_PROFILE/profile_test/OS_MONTHS ->
+    os_days, concept_id 500.
+
+    proposed_hash is the sha256 of the ledger.proposed.yaml THAT fixture
+    pair + `--max_failed_frac 0.5` (default params otherwise) produces --
+    verified directly by running the pipeline once and hashing the result
+    (see tests/confirm_ledger.nf.test's own header comment). If that fixture
+    pair or its params ever change, this hash goes stale on purpose -- that
+    is the staleness guard doing its job (§5.1's own Contract), not a bug
+    here.
+    """
+    rows = [
+        {
+            "cohort_id": "COHORT_PROFILE",
+            "dataset_id": "profile_test",
+            "column": "OS_MONTHS",
+            "decision": "accept",
+            "variable": "os_days",
+            "concept_id": 500,
+            "unit_in": "month",  # the header/name reads as months; os_days' declared unit is days (d) -- a genuine mismatch for §6/map to reconcile later
+            "confirmed_by": "a.reviewer",
+            "rationale": "os_days evidence dominates the ranked proposals; OS_MONTHS' header and observed range both read as months",
+            "proposed_hash": "sha256:51a16d77e4aeeab83ad572f4e40ff192dd7d4c1568d677d8d45cbcc6c8a628f2",
+        }
+    ]
+    path = target_dir / "confirm_ledger_valid.yaml"
+    path.write_text(yaml.safe_dump(rows, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def confirm_ledger_stale(target_dir: Path) -> Path:
+    """Same row as confirm_ledger_valid(), but a deliberately WRONG
+    proposed_hash (as if made against an older ledger.proposed.yaml, e.g.
+    before a pack bump). Exercises the staleness SIDE clause and
+    --allow_stale_ledger."""
+    rows = [
+        {
+            "cohort_id": "COHORT_PROFILE",
+            "dataset_id": "profile_test",
+            "column": "OS_MONTHS",
+            "decision": "accept",
+            "variable": "os_days",
+            "concept_id": 500,
+            "unit_in": "month",
+            "confirmed_by": "a.reviewer",
+            "rationale": "os_days evidence dominates the ranked proposals; OS_MONTHS' header and observed range both read as months",
+            "proposed_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        }
+    ]
+    path = target_dir / "confirm_ledger_stale.yaml"
+    path.write_text(yaml.safe_dump(rows, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def confirm_ledger_no_rationale(target_dir: Path) -> Path:
+    """A valid key + hash, but an `accept` decision with no `rationale` at
+    all. Exercises --require_rationale."""
+    rows = [
+        {
+            "cohort_id": "COHORT_PROFILE",
+            "dataset_id": "profile_test",
+            "column": "OS_MONTHS",
+            "decision": "accept",
+            "variable": "os_days",
+            "concept_id": 500,
+            "unit_in": "month",
+            "confirmed_by": "a.reviewer",
+            "proposed_hash": "sha256:51a16d77e4aeeab83ad572f4e40ff192dd7d4c1568d677d8d45cbcc6c8a628f2",
+        }
+    ]
+    path = target_dir / "confirm_ledger_no_rationale.yaml"
+    path.write_text(yaml.safe_dump(rows, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def confirm_ledger_unmatched(target_dir: Path) -> Path:
+    """A row whose (cohort_id, dataset_id, column) key names a column that
+    does NOT exist anywhere in ledger.proposed.yaml for this same fixture
+    pair (a typo / stale reference, distinct from a whole-file hash
+    mismatch). Exercises the card's own Trap guard: matched by key, never by
+    row position, and never waved through by --allow_stale_ledger (that
+    escape hatch is scoped to hash drift only)."""
+    rows = [
+        {
+            "cohort_id": "COHORT_PROFILE",
+            "dataset_id": "profile_test",
+            "column": "NOT_A_REAL_COLUMN",
+            "decision": "accept",
+            "variable": "os_days",
+            "concept_id": 500,
+            "unit_in": "month",
+            "confirmed_by": "a.reviewer",
+            "rationale": "this key does not exist in ledger.proposed.yaml",
+            "proposed_hash": "sha256:51a16d77e4aeeab83ad572f4e40ff192dd7d4c1568d677d8d45cbcc6c8a628f2",
+        }
+    ]
+    path = target_dir / "confirm_ledger_unmatched.yaml"
+    path.write_text(yaml.safe_dump(rows, sort_keys=False, default_flow_style=False))
+    return path
+
+
+# §5.2's own fixture pair (tests/rules_stable.nf.test): two accepted
+# decisions against propose_samplesheet()/propose_pack() -- SEX_CODE ->
+# sex (concept_id 100), WEIGHT_KG -> weight (concept_id 200, unit_in "kg").
+# proposed_hash is the sha256 of THAT fixture pair's ledger.proposed.yaml
+# under default params (verified directly, same method as
+# confirm_ledger_valid()'s own docstring).
+_RULES_FIXTURE_HASH = "sha256:c91cd17efe84820fc4d124d7a2e67ec4c83aefd923018a47d8d780ae41ab0ae2"
+
+_RULES_FIXTURE_SEX_ROW = {
+    "cohort_id": "COHORT_PROPOSE",
+    "dataset_id": "propose_test",
+    "column": "SEX_CODE",
+    "decision": "accept",
+    "variable": "sex",
+    "concept_id": 100,
+    "confirmed_by": "a.reviewer",
+    "rationale": "value set matches sex's declared domain_values exactly",
+    "proposed_hash": _RULES_FIXTURE_HASH,
+}
+
+_RULES_FIXTURE_WEIGHT_ROW = {
+    "cohort_id": "COHORT_PROPOSE",
+    "dataset_id": "propose_test",
+    "column": "WEIGHT_KG",
+    "decision": "accept",
+    "variable": "weight",
+    "concept_id": 200,
+    "unit_in": "kg",
+    "confirmed_by": "a.reviewer",
+    "rationale": "name and unit both match weight's declaration",
+    "proposed_hash": _RULES_FIXTURE_HASH,
+}
+
+
+def confirm_ledger_rules_order_a(target_dir: Path) -> Path:
+    """The card's own done-when fixture, order A: SEX_CODE listed first."""
+    path = target_dir / "confirm_ledger_rules_order_a.yaml"
+    rows = [_RULES_FIXTURE_SEX_ROW, _RULES_FIXTURE_WEIGHT_ROW]
+    path.write_text(yaml.safe_dump(rows, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def confirm_ledger_rules_order_b(target_dir: Path) -> Path:
+    """The IDENTICAL two decisions as confirm_ledger_rules_order_a(), with
+    WEIGHT_KG listed FIRST instead -- proves rule_id is a pure content hash
+    of (kind, from, to, params), never a function of row order (the card's
+    own Trap)."""
+    path = target_dir / "confirm_ledger_rules_order_b.yaml"
+    rows = [_RULES_FIXTURE_WEIGHT_ROW, _RULES_FIXTURE_SEX_ROW]
+    path.write_text(yaml.safe_dump(rows, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def confirm_ledger_collision(target_dir: Path) -> Path:
+    """Two DIFFERENT source columns deliberately confirmed onto the SAME
+    target variable ("sex"), to exercise §5.2's collision policy (nogo:
+    "Never merge two rules that write the same target cell; fail and name
+    both"). WEIGHT_KG's own top-ranked proposal is actually "weight" (see
+    confirm_ledger_rules_order_a()) -- `remap` overrides that here on
+    purpose, so this fixture stays honest about what a `remap` decision
+    actually is: a human choosing something OTHER than the ledger's own top
+    proposal, still for a column the ledger genuinely offers (the Trap's own
+    key-matching guard still applies)."""
+    rows = [
+        _RULES_FIXTURE_SEX_ROW,
+        {
+            "cohort_id": "COHORT_PROPOSE",
+            "dataset_id": "propose_test",
+            "column": "WEIGHT_KG",
+            "decision": "remap",
+            "variable": "sex",
+            "concept_id": 100,
+            "confirmed_by": "a.reviewer",
+            "rationale": "deliberate collision fixture: WEIGHT_KG remapped onto sex, the same target SEX_CODE already claims",
+            "proposed_hash": _RULES_FIXTURE_HASH,
+        },
+    ]
+    path = target_dir / "confirm_ledger_collision.yaml"
+    path.write_text(yaml.safe_dump(rows, sort_keys=False, default_flow_style=False))
+    return path
+
+
 FIXTURES = [
     valid_samplesheet,
     duplicate_samplesheet,
@@ -535,6 +722,13 @@ FIXTURES = [
     propose_samplesheet,
     propose_cap_pack,
     propose_cap_samplesheet,
+    confirm_ledger_valid,
+    confirm_ledger_stale,
+    confirm_ledger_no_rationale,
+    confirm_ledger_unmatched,
+    confirm_ledger_rules_order_a,
+    confirm_ledger_rules_order_b,
+    confirm_ledger_collision,
 ]
 
 

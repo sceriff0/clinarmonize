@@ -256,6 +256,41 @@
                     "help_text": "Rounding, so a float's last bit cannot change the ledger's hash (§4.3, the card's own Trap).",
                     "fa_icon": "fas fa-ruler-combined"
                 },
+                "confirmed_ledger": {
+                    "type": ["string", "null"],
+                    "default": null,
+                    "description": "Path to ledger.confirmed.yaml -- the human review decision for every proposed column.",
+                    "help_text": "The human gate; null stops the run after propose with instructions on the path to write (§5.1). Never auto-confirmed by any profile, including -profile test -- there is no other flag that can supply a decision in its place.",
+                    "fa_icon": "fas fa-user-check"
+                },
+                "require_rationale": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "An accept with no rationale is rejected at parse time.",
+                    "help_text": "An accept with no rationale is rejected at parse time (§5.1).",
+                    "fa_icon": "fas fa-comment-dots"
+                },
+                "allow_stale_ledger": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Escape hatch when a pack bump did not change proposals; logged loudly.",
+                    "help_text": "Escape hatch for a stale proposed_hash when a pack bump did not change proposals; logged loudly, never silent (§5.1). Scoped to hash drift only -- a confirmed row naming a column absent from ledger.proposed.yaml entirely is always refused.",
+                    "fa_icon": "fas fa-exclamation-triangle"
+                },
+                "rule_id_prefix": {
+                    "type": "string",
+                    "default": "R-",
+                    "description": "Cosmetic prefix for every compiled rule_id.",
+                    "help_text": "Cosmetic; the id's stability comes from the content hash of (kind, from, to, params), never from this prefix or from position (§5.2).",
+                    "fa_icon": "fas fa-hashtag"
+                },
+                "fail_on_rule_collision": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Two rules writing the same target cell is a defect, not a merge.",
+                    "help_text": "Two rules writing the same target cell is a defect, not a merge (§5.2). False logs the collision loudly and keeps both rules, unmerged -- it never causes a silent merge either way.",
+                    "fa_icon": "fas fa-code-branch"
+                },
                 "generality_terms": {
                     "type": "string",
                     "default": "assets/forbidden_terms.txt",

@@ -1,0 +1,144 @@
+// §5.2 — compile decisions into versioned, addressable mapping rules.
+//
+// The card's own done-when: "Reordering the confirmed ledger leaves every
+// rule_id unchanged." rule_id is a content hash of (kind, from, to, params)
+// -- never of position or time (the card's own Trap). Proven here by
+// running the SAME two accepted decisions through the full pipeline TWICE,
+// with their order swapped between test_data/fixtures/confirm_ledger_rules_order_a.yaml
+// and .../confirm_ledger_rules_order_b.yaml (see each file's own header),
+// and asserting BOTH runs land on the identical, independently precomputed
+// rule_id values (see each file's header for how they were computed:
+// sha256 of the canonical (sort_keys, fixed separators) JSON encoding of
+// {kind, from, to, params}, exactly what bin/compile_rules.py computes).
+// Hardcoding the same expected literal in both tests is what proves the two
+// SEPARATE pipeline runs agree -- nf-test isolates each test()'s outputDir,
+// so there is no other way to compare them directly within one file.
+//
+// Fixtures: reuses test_data/fixtures/propose_samplesheet.csv +
+// test_data/fixtures/propose_pack.yaml (§4.1's own fixture pair, already
+// exercised by tests/propose_ledger.nf.test's third test): SEX_CODE -> sex
+// (concept_id 100), WEIGHT_KG -> weight (concept_id 200, unit_in "kg").
+//
+// Run once before this test:
+//   python3 tests/fixtures/fetch_eunomia.py
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/rules_stable.nf.test
+
+nextflow_pipeline {
+
+    name "Reordering the confirmed ledger leaves every rule_id unchanged"
+    script "../main.nf"
+    tag "pipeline"
+    tag "confirm"
+
+    test("order A (SEX_CODE, then WEIGHT_KG) compiles the expected content-hash rule_ids") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "confirm"
+                input             = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/propose_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_rules_order_a.yaml"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def ruleset = new groovy.json.JsonSlurper().parse(new File("$outputDir/rules/ruleset.json")) as List
+            assert ruleset.size() == 2
+
+            def bySexCode = ruleset.find { it.from.column == 'SEX_CODE' }
+            def byWeightKg = ruleset.find { it.from.column == 'WEIGHT_KG' }
+            assert bySexCode != null && byWeightKg != null
+
+            // Precomputed independently (see this file's header) -- the
+            // SAME two literals order B's test below asserts.
+            assert bySexCode.rule_id == 'R-f20c4a8dbab7517246af57c820459a85b2857be32cda7db0a66e87253aff627a'
+            assert byWeightKg.rule_id == 'R-12dce2fe7e153d9dc3456b4c2830e69c772324082c0b0e53ca3dee16a935d5d9'
+
+            // rule_version is the PACK version that produced it (§5.2 Contract).
+            assert ruleset.every { it.rule_version == '0.1.0' }
+        }
+    }
+
+    test("order B (WEIGHT_KG, then SEX_CODE) compiles the IDENTICAL rule_ids -- position never leaked in") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "confirm"
+                input             = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/propose_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_rules_order_b.yaml"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def ruleset = new groovy.json.JsonSlurper().parse(new File("$outputDir/rules/ruleset.json")) as List
+            assert ruleset.size() == 2
+
+            def bySexCode = ruleset.find { it.from.column == 'SEX_CODE' }
+            def byWeightKg = ruleset.find { it.from.column == 'WEIGHT_KG' }
+            assert bySexCode != null && byWeightKg != null
+
+            // Identical literals to order A's test above, even though this
+            // run's own confirmed_ledger listed the two rows in the
+            // opposite order.
+            assert bySexCode.rule_id == 'R-f20c4a8dbab7517246af57c820459a85b2857be32cda7db0a66e87253aff627a'
+            assert byWeightKg.rule_id == 'R-12dce2fe7e153d9dc3456b4c2830e69c772324082c0b0e53ca3dee16a935d5d9'
+
+            // ruleset.json's OWN listed order is deterministic (sorted by
+            // from.column, bin/compile_rules.py), independent of the
+            // confirmed ledger's row order too.
+            assert ruleset*.from.column == ['SEX_CODE', 'WEIGHT_KG']
+        }
+    }
+
+    test("two different source columns confirmed onto the SAME target variable is a collision, never silently merged") {
+
+        when {
+            params {
+                outdir                    = "$outputDir"
+                stop_after                = "confirm"
+                input                     = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack              = "$baseDir/test_data/fixtures/propose_pack.yaml"
+                confirmed_ledger          = "$baseDir/test_data/fixtures/confirm_ledger_collision.yaml"
+                fail_on_rule_collision    = true
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '')
+            assert report.toLowerCase().contains('collision')
+            assert report.contains('SEX_CODE')
+        }
+    }
+
+    test("fail_on_rule_collision = false keeps both colliding rules, unmerged, with distinct rule_ids") {
+
+        when {
+            params {
+                outdir                    = "$outputDir"
+                stop_after                = "confirm"
+                input                     = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack              = "$baseDir/test_data/fixtures/propose_pack.yaml"
+                confirmed_ledger          = "$baseDir/test_data/fixtures/confirm_ledger_collision.yaml"
+                fail_on_rule_collision    = false
+            }
+        }
+
+        then {
+            assert workflow.success
+            def ruleset = new groovy.json.JsonSlurper().parse(new File("$outputDir/rules/ruleset.json")) as List
+            def toSex = ruleset.findAll { it.to.variable == 'sex' }
+            assert toSex.size() == 2 // both kept -- never merged into one
+            assert (toSex*.rule_id as Set).size() == 2 // distinct content, distinct ids
+            assert (toSex*.from.column as Set) == (['SEX_CODE', 'WEIGHT_KG'] as Set)
+        }
+    }
+}

@@ -21,6 +21,8 @@ include { PROFILE_COLUMNS as PROFILE_COLUMNS_PERMUTED } from '../modules/local/p
 include { PROPOSE_CANDIDATES } from '../modules/local/propose_candidates/main'
 include { PROPOSE_CHANNELS } from '../modules/local/propose_channels/main'
 include { PROPOSE_LEDGER } from '../modules/local/propose_ledger/main'
+include { CONFIRM_LEDGER } from '../modules/local/confirm_ledger/main'
+include { COMPILE_RULES } from '../modules/local/compile_rules/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -48,7 +50,7 @@ def stageGraph() {
 }
 
 def implementedStages() {
-    return ['ingest', 'profile', 'propose'] as Set
+    return ['ingest', 'profile', 'propose', 'confirm'] as Set
 }
 
 def requireStageImplemented(String stage) {
@@ -319,6 +321,52 @@ def buildLedgerParamsJson(Integer ledgerTopK, Integer ledgerFloatPrecision) {
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    §5.1 / §5.2 — the human gate, and the rule compiler behind it
+
+    Contract (docs/steps/s5-1.md):
+      IN   --confirmed_ledger ledger.confirmed.yaml (required to pass §5)
+           ledger.proposed.yaml (for the staleness check)
+      OUT  ch_confirmed : [ cohort_id, dataset_id, column, variable, concept_id, rule_id ]
+      SIDE exits non-zero, with the diff, when the confirmed ledger is stale
+
+    Contract (docs/steps/s5-2.md):
+      IN   ch_confirmed
+      OUT  rules/ruleset.json  [ {rule_id, rule_version, kind, from, to, params} ]
+      SIDE none; rule_id is a content hash, so an unchanged rule keeps its id
+
+    ch_confirmed (this workflow's own emitted channel, matching s5-1's OUT
+    slot literally) is assembled AFTER §5.2 has run, not before: rule_id is
+    §5.2's own output field, never re-derived here or duplicated between the
+    two cards. CONFIRM_LEDGER (§5.1) writes decisions.json; COMPILE_RULES
+    (§5.2) reads it and writes rules/ruleset.json; this workflow reads THAT
+    file back (Groovy JsonSlurper, the same pattern resolveHoldoutLock uses
+    for locked_model.json) and re-shapes each compiled rule into the tuple
+    s5-1's OUT slot names.
+*/
+
+//
+// Serialises §5.1's two validation knobs into one JSON blob, same reasoning
+// as buildProfileParamsJson & co. above.
+//
+def buildConfirmParamsJson(Boolean requireRationale, Boolean allowStaleLedger) {
+    return groovy.json.JsonOutput.toJson([
+        require_rationale : requireRationale,
+        allow_stale_ledger: allowStaleLedger,
+    ])
+}
+
+//
+// Serialises §5.2's two knobs into one JSON blob.
+//
+def buildCompileParamsJson(String ruleIdPrefix, Boolean failOnRuleCollision) {
+    return groovy.json.JsonOutput.toJson([
+        rule_id_prefix        : ruleIdPrefix,
+        fail_on_rule_collision: failOnRuleCollision,
+    ])
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     §10.1 — the outcome-permutation harness
 
     Contract (docs/steps/s10-1.md):
@@ -437,6 +485,11 @@ workflow CLINICALHARMONIZE {
     emit_confirmation_plots // boolean: emit the one plot that would kill each proposal (§4.2, Ruling R16: SVG)
     ledger_top_k            // int:     proposals written per column; the rest are counted, not listed (§4.3)
     ledger_float_precision  // int:     rounding, so a float's last bit cannot change the ledger's hash (§4.3)
+    confirmed_ledger        // string?: path to ledger.confirmed.yaml -- the human gate; null stops the run (§5.1)
+    require_rationale       // boolean: an accept with no rationale is rejected at parse time (§5.1)
+    allow_stale_ledger      // boolean: escape hatch for a stale proposed_hash, logged loudly (§5.1)
+    rule_id_prefix          // string:  cosmetic prefix; stability comes from the content hash (§5.2)
+    fail_on_rule_collision  // boolean: two rules writing the same target cell is a defect, not a merge (§5.2)
     outdir                 // string:  output directory
 
     main:
@@ -704,6 +757,84 @@ workflow CLINICALHARMONIZE {
     }
 
     //
+    // §5.1 / §5.2 — the human gate, and the rule compiler behind it.
+    //
+    // §10.1 is scoped to the PROPOSER alone (ADR-003): nothing below reads
+    // ch_permuted_profiles_by_replicate, PERMUTE_OUTCOME's output, or any
+    // per-replicate seed. CONFIRM_LEDGER/COMPILE_RULES run exactly ONCE,
+    // always against the BASELINE's ledger.proposed.yaml (replicate ==
+    // null) -- a harness run in progress does not change this stage at all.
+    //
+    def ch_confirmed = channel.empty()
+
+    if (graph.indexOf(targetStage) >= graph.indexOf('confirm')) {
+        //
+        // The human gate itself: null --confirmed_ledger stops the run
+        // HERE, with a clear message naming the path to write, under EVERY
+        // profile, -profile test included. This is the ONLY place that
+        // check lives (never inside CONFIRM_LEDGER's own script) precisely
+        // so the auto-confirm boundary this card's brief warns about cannot
+        // be tripped by a stray params.* flag: there is no
+        // params.auto_confirm, no threshold, nothing a user could set
+        // outside -profile test that would delete this gate, because
+        // nothing besides a real, human-authored file on disk can ever
+        // make this `if` false.
+        //
+        if (!confirmed_ledger) {
+            def suggestedPath = "${outdir}/ledger.confirmed.yaml"
+            error(
+                "No confirmed ledger. §5's human gate requires a reviewed decision " +
+                "(accept/reject/remap/defer) for every column in '${outdir}/ledger.proposed.yaml' " +
+                "before the pipeline can proceed past 'propose'. Copy that file to " +
+                "'${suggestedPath}', add decision/variable/concept_id/confirmed_by/rationale/" +
+                "proposed_hash for each row, then re-run with --confirmed_ledger ${suggestedPath}."
+            )
+        }
+
+        def confirmParamsJson = buildConfirmParamsJson(require_rationale, allow_stale_ledger)
+
+        // The baseline's own ledger.proposed.yaml -- ch_ledgers already
+        // carries it (replicate == null), so this is a second reference to
+        // the SAME broadcast channel PROPOSE_LEDGER filled above, not a
+        // second read of the file from disk.
+        def ch_baseline_ledger = ch_ledgers
+            .filter { replicate, ledger -> replicate == null }
+            .map { replicate, ledger -> ledger }
+
+        CONFIRM_LEDGER(
+            file(confirmed_ledger, checkIfExists: true),
+            ch_baseline_ledger,
+            confirmParamsJson,
+        )
+        ch_versions = ch_versions.mix(CONFIRM_LEDGER.out.versions)
+
+        def compileParamsJson = buildCompileParamsJson(rule_id_prefix, fail_on_rule_collision)
+        // rule_version is the PACK version that produced it (§5.2 Contract)
+        // -- a second, small read of the same pack YAML loadPackForPropose
+        // already read above, same reasoning that function's own comment
+        // gives (not a second source of truth, just a second read).
+        def packVersionForRules = new org.yaml.snakeyaml.Yaml().load(file(resolvePackPath(concept_pack)).text).version
+
+        COMPILE_RULES(
+            CONFIRM_LEDGER.out.decisions,
+            compileParamsJson,
+            packVersionForRules,
+        )
+        ch_versions = ch_versions.mix(COMPILE_RULES.out.versions)
+
+        // ch_confirmed, matching s5-1's own OUT slot literally: each
+        // compiled rule re-shaped into [cohort_id, dataset_id, column,
+        // variable, concept_id, rule_id]. rule_id is READ from §5.2's own
+        // output here, never re-derived -- there is exactly one place in
+        // this pipeline that computes a rule_id (bin/compile_rules.py).
+        ch_confirmed = COMPILE_RULES.out.ruleset.flatMap { rulesetFile ->
+            new groovy.json.JsonSlurper().parse(rulesetFile).collect { rule ->
+                [rule.from.cohort_id, rule.from.dataset_id, rule.from.column, rule.to.variable, rule.to.concept_id, rule.rule_id]
+            }
+        }
+    }
+
+    //
     // §10.1 — now that ch_ledgers (§4.3, above) is known one way or the
     // other (a real per-replicate channel once 'propose' has run, or still
     // empty if --stop_after stopped short of it), report the harness's
@@ -740,6 +871,7 @@ workflow CLINICALHARMONIZE {
     candidates = ch_candidates     // channel: [ val(replicate), path(candidates.parquet) ] (§4.1; replicate is null for the baseline)
     evidence   = ch_evidence       // channel: [ val(replicate), path(evidence.parquet) ] (§4.2; replicate is null for the baseline)
     ledger     = ch_ledgers        // channel: [ val(replicate), path(ledger.proposed.yaml) ] (§4.3; replicate is null for the baseline)
+    confirmed  = ch_confirmed      // channel: [ cohort_id, dataset_id, column, variable, concept_id, rule_id ] (§5.1/§5.2)
     versions   = ch_versions       // channel: [ path(versions.yml) ]
 }
 

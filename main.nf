@@ -77,6 +77,11 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
         params.emit_confirmation_plots,
         params.ledger_top_k,
         params.ledger_float_precision,
+        params.confirmed_ledger,
+        params.require_rationale,
+        params.allow_stale_ledger,
+        params.rule_id_prefix,
+        params.fail_on_rule_collision,
         params.outdir,
     )
     emit:
@@ -85,6 +90,7 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
     candidates = CLINICALHARMONIZE.out.candidates // channel: [ val(replicate), path(candidates.parquet) ]
     evidence   = CLINICALHARMONIZE.out.evidence   // channel: [ val(replicate), path(evidence.parquet) ]
     ledger     = CLINICALHARMONIZE.out.ledger     // channel: [ val(replicate), path(ledger.proposed.yaml) ]
+    confirmed  = CLINICALHARMONIZE.out.confirmed  // channel: [ cohort_id, dataset_id, column, variable, concept_id, rule_id ]
 }
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

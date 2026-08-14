@@ -1,0 +1,25 @@
+# assets/test_ledger.yaml — the §5.1 done-when's --confirmed_ledger fixture:
+#   nextflow run . -profile test --confirmed_ledger assets/test_ledger.yaml
+#
+# -profile test's own default samplesheet (test_data/samplesheet.csv,
+# fetched at runtime — Ruling R3) against the default pack
+# (assets/packs/minimal.yaml) proposes NOTHING under the default candidate
+# generators: real Eunomia OMOP column names (GENDER_CONCEPT_ID,
+# BIRTH_DATETIME, ...) do not cheaply match minimal.yaml's generic variable
+# names (age_at_index, sex, vital_status), so ledger.proposed.yaml for that
+# combination is genuinely `[]`. An empty confirmed ledger is therefore the
+# ONLY honest fixture for this exact CLI invocation: it has nothing to
+# accept, reject, remap or defer, and so nothing to validate a
+# proposed_hash against either — this file passes §5.1's gate no matter how
+# ledger.proposed.yaml's bytes change on some later run, because there is
+# nothing in it to go stale.
+#
+# What this fixture demonstrates is narrower, and deliberately so: the
+# MECHANISM that distinguishes "a ledger was provided" from "none was" (the
+# only thing §5.1's own literal done-when tests). It is NOT a worked example
+# of a real accept/reject/remap/defer decision — see
+# test_data/fixtures/confirm_ledger_valid.yaml (tests/confirm_ledger.nf.test)
+# and test_data/fixtures/confirm_ledger_rules_order_a.yaml
+# (tests/rules_stable.nf.test) for those, built against fixture data that
+# actually proposes real candidates.
+[]

@@ -1,0 +1,228 @@
+// §5.1 — accept a confirmed ledger and refuse to guess when it is absent.
+//
+// Fixtures: reuses test_data/fixtures/profiling_samplesheet.csv +
+// assets/packs/propose_channels_fixture.yaml (§4.2's own fixture pair,
+// already exercised by tests/propose_ledger.nf.test's first test), whose
+// one real proposal is COHORT_PROFILE/profile_test/OS_MONTHS -> os_days.
+// The four confirm_ledger_*.yaml files under test_data/fixtures/ are new,
+// written by tests/fixtures/make_fixtures.py's own confirm_ledger_*()
+// functions per this task (test_data/ is entirely gitignored -- like every
+// other fixture this suite uses, they must be regenerated, not committed
+// as static files) -- no other ledger.confirmed.yaml fixture existed
+// before Task 6.
+//
+// Run once before this test:
+//   python3 tests/fixtures/fetch_eunomia.py
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/confirm_ledger.nf.test
+
+nextflow_pipeline {
+
+    name "Accept a confirmed ledger and refuse to guess when it is absent"
+    script "../main.nf"
+    tag "pipeline"
+    tag "confirm"
+
+    test("no --confirmed_ledger stops cleanly after propose and prints the path to write (§5.1 done-when, clause 1)") {
+
+        when {
+            params {
+                outdir       = "$outputDir"
+                stop_after   = "confirm"
+                input        = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac = 0.5
+                // confirmed_ledger left at its default (null) — the human
+                // gate, absent a human.
+            }
+        }
+
+        then {
+            // A clean stop (Nextflow's error() idiom, same as
+            // resolveHoldoutLock/requireStageImplemented elsewhere in this
+            // repo) is still workflow.success == false -- "cleanly" means a
+            // single clear message, never a bare stack trace. Note: DSL2
+            // builds the whole dataflow graph by executing the workflow
+            // script top-to-bottom BEFORE any task is actually scheduled
+            // (the same reason requireStageImplemented's OWN refusal always
+            // shows completed=0, regardless of which stage it names) -- so
+            // "stops after propose" is a STAGE-GRAPH position (the request
+            // was for 'confirm', which sits after 'propose'), not a claim
+            // that ledger.proposed.yaml is already on disk when this
+            // error() fires.
+            assert !workflow.success
+
+            // "after propose", not "before propose can even be requested":
+            // the refusal message is specifically the confirm gate's own
+            // message, not requireStageImplemented's "not implemented" one
+            // -- 'confirm' IS implemented; it is the ledger that is missing.
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '')
+            assert !report.contains('is not implemented in this phase')
+
+            // The message names the path to write, so a human knows exactly
+            // what to do next.
+            assert report.contains('ledger.confirmed.yaml')
+        }
+    }
+
+    test("a valid confirmed ledger with a matching proposed_hash proceeds (§5.1 done-when, clause 2)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "confirm"
+                input             = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack      = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac   = 0.5
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_valid.yaml"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            // §5.2's OUT slot, compiled from this one accepted decision.
+            def rulesetFile = new File("$outputDir/rules/ruleset.json")
+            assert rulesetFile.exists()
+            def ruleset = new groovy.json.JsonSlurper().parse(rulesetFile) as List
+            assert ruleset.size() == 1
+
+            def rule = ruleset[0]
+            assert (rule.keySet() as Set) == (['rule_id', 'rule_version', 'kind', 'from', 'to', 'params'] as Set)
+            assert rule.kind == 'column_map'
+            assert rule.from == [cohort_id: 'COHORT_PROFILE', dataset_id: 'profile_test', column: 'OS_MONTHS']
+            assert rule.to == [variable: 'os_days', concept_id: 500]
+            assert rule.params == [unit_in: 'month']
+            assert rule.rule_version == '0.1.0' // the pack's own `version` field
+            assert rule.rule_id.startsWith('R-') // rule_id_prefix, cosmetic
+            assert rule.rule_id.size() > 'R-'.size() + 32 // a real content hash, not a bare counter like the card's illustrative "R-0142"
+        }
+    }
+
+    test("a stale confirmed ledger is refused with the diff, unless --allow_stale_ledger") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "confirm"
+                input             = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack      = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac   = 0.5
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_stale.yaml"
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '')
+            assert report.contains('stale') || report.toLowerCase().contains('proposed_hash')
+        }
+    }
+
+    test("--allow_stale_ledger overrides a stale hash and still proceeds") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                stop_after          = "confirm"
+                input               = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack        = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac     = 0.5
+                confirmed_ledger    = "$baseDir/test_data/fixtures/confirm_ledger_stale.yaml"
+                allow_stale_ledger  = true
+            }
+        }
+
+        then {
+            assert workflow.success
+            assert new File("$outputDir/rules/ruleset.json").exists()
+        }
+    }
+
+    test("an accept with no rationale is rejected at parse time (--require_rationale)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "confirm"
+                input             = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack      = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac   = 0.5
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_no_rationale.yaml"
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '')
+            assert report.toLowerCase().contains('rationale')
+        }
+    }
+
+    test("require_rationale = false lets the same accept-with-no-rationale row through") {
+
+        when {
+            params {
+                outdir             = "$outputDir"
+                stop_after         = "confirm"
+                input              = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack       = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac    = 0.5
+                confirmed_ledger   = "$baseDir/test_data/fixtures/confirm_ledger_no_rationale.yaml"
+                require_rationale  = false
+            }
+        }
+
+        then {
+            assert workflow.success
+            assert new File("$outputDir/rules/ruleset.json").exists()
+        }
+    }
+
+    test("the Trap: a confirmed row naming a column absent from ledger.proposed.yaml is refused, matched by key not position") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "confirm"
+                input             = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack      = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac   = 0.5
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_unmatched.yaml"
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '')
+            assert report.contains('NOT_A_REAL_COLUMN')
+        }
+    }
+
+    test("§0 the invariant: the pack's outcome variable can never be compiled into a rule") {
+        // study_endpoint (assets/packs/propose_channels_fixture.yaml) is
+        // outcome: true. Even a maximally permissive (fabricated) confirmed
+        // ledger that ACCEPTS the outcome variable can never appear, because
+        // §4.1 never proposes it in the first place -- confirm only ever
+        // sees what propose offered. There is nothing to accept it FROM.
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "confirm"
+                input             = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack      = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac   = 0.5
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_valid.yaml"
+            }
+        }
+
+        then {
+            assert workflow.success
+            def pack = new org.yaml.snakeyaml.Yaml().load(new File("$baseDir/assets/packs/propose_channels_fixture.yaml").text)
+            def outcomeNames = pack.variables.findAll { it.outcome == true }*.name as Set
+            assert outcomeNames.size() > 0
+            def ruleset = new groovy.json.JsonSlurper().parse(new File("$outputDir/rules/ruleset.json")) as List
+            assert ruleset.every { !(it.to.variable in outcomeNames) }
+        }
+    }
+}
