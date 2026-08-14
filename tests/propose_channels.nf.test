@@ -29,7 +29,7 @@ nextflow_pipeline {
     tag "pipeline"
     tag "propose"
 
-    test("a fixture column of months scored against a day-unit concept is ranked down by unit_plausibility alone while the other four channels that CAN score in phase 0 score it high (§4.2 done-when)") {
+    test("a fixture column of months scored against a day-unit concept is ranked down by unit_plausibility alone, while cardinality and value_overlap genuinely diverge rather than moving together (§4.2 done-when, fix round 1 I3)") {
 
         when {
             params {
@@ -66,8 +66,13 @@ print(json.dumps([dict(zip(cols, r)) for r in rows]))
             def rows = readParquetRows(evidenceFile.absolutePath)
             assert rows.size() > 0
 
-            // The card's own OUT columns, verbatim -- no more, no less.
-            assert (rows[0].keySet() as Set) == (['candidate_key', 'channel', 'score', 'detail'] as Set)
+            // The card's own OUT columns, PLUS the two fix-round-1 columns
+            // (I4 / Ruling R23): `status` (the 3-value coarsening of each
+            // channel's detail.status) and `effective_weight` (R15's
+            // redistribution, precomputed so a caller's total is a pure
+            // function of this file -- see bin/propose_channels.py's
+            // _effective_weights).
+            assert (rows[0].keySet() as Set) == (['candidate_key', 'channel', 'score', 'detail', 'status', 'effective_weight'] as Set)
 
             def candidateKey = 'COHORT_PROFILE::profile_test::OS_MONTHS::os_days'
             def byChannel = rows.findAll { it.candidate_key == candidateKey }
@@ -81,55 +86,59 @@ print(json.dumps([dict(zip(cols, r)) for r in rows]))
             // ambiguity band (which would have matched 'd' directly at 0.3).
             def unitDetail = new groovy.json.JsonSlurper().parseText(byChannel['unit_plausibility'].detail)
             assert byChannel['unit_plausibility'].score < 0.5
+            assert byChannel['unit_plausibility'].status == 'scored'
             assert unitDetail.matched_ucum == 'mo'
             assert unitDetail.reason.contains('30.4375')
 
-            // The other four channels that CAN score in phase 0 all score
-            // this candidate high: same name-ish column/variable, numeric
-            // type on both sides, matching cardinality, and (by fixture
-            // construction) an exact value-set match.
-            ['name_similarity', 'type_agreement', 'cardinality', 'value_overlap'].each { ch ->
+            // name_similarity, type_agreement and cardinality all score this
+            // candidate high: same name-ish column/variable, numeric type on
+            // both sides, matching cardinality.
+            ['name_similarity', 'type_agreement', 'cardinality'].each { ch ->
                 assert byChannel[ch].score != null
+                assert byChannel[ch].status == 'scored'
                 assert byChannel[ch].score >= 0.7 : "${ch} scored ${byChannel[ch].score}, expected >= 0.7"
             }
+
+            // Fix round 1 (I3): value_overlap's domain_values is only a
+            // PARTIAL overlap with OS_MONTHS's values (12 of 20, plus 8 it
+            // never carries) -- deliberately, so this channel and
+            // cardinality (the card's own Trap: "the pair most likely to be
+            // redundant") are shown DIVERGING rather than moving together.
+            // cardinality stays ~1.0 (n_unique matches domain_values' SIZE,
+            // unaffected by which 20 values they are); value_overlap drops
+            // to the real Jaccard, 12/28.
+            assert byChannel['value_overlap'].score != null
+            assert byChannel['value_overlap'].status == 'scored'
+            assert Math.abs(byChannel['value_overlap'].score - (12.0 / 28.0)) < 1.0e-9
+            assert byChannel['cardinality'].score != byChannel['value_overlap'].score
+            assert (byChannel['cardinality'].score - byChannel['value_overlap'].score) > 0.3 : 'cardinality and value_overlap must diverge, not move together (the card\'s Trap)'
 
             // distribution_distance is EXCLUDED, not scored 0 (Ruling R15):
             // there is no confirmed reference in phase 0, ever.
             assert byChannel['distribution_distance'].score == null
+            assert byChannel['distribution_distance'].status == 'no-reference'
+            assert byChannel['distribution_distance'].effective_weight == 0.0
             def distDetail = new groovy.json.JsonSlurper().parseText(byChannel['distribution_distance'].detail)
             assert distDetail.status == 'no-reference'
 
-            // The ranking property itself: with R15's redistribution (sum of
-            // weight*score over channels that scored, divided by the sum of
-            // their weights -- distribution_distance's weight drops out
-            // entirely), the actual weighted total is strictly lower than the
-            // SAME arithmetic with only unit_plausibility's score swapped for
-            // a high one. unit_plausibility alone is what drags this candidate
-            // down; nothing else needs to change for the total to recover.
-            def weights = [name: 0.15, type: 0.15, card: 0.1, value: 0.3, dist: 0.15, unit: 0.15] // nextflow_schema.json's channel_weights default, verbatim
-            def shortKey = [
-                name_similarity       : 'name',
-                type_agreement         : 'type',
-                cardinality            : 'card',
-                value_overlap          : 'value',
-                distribution_distance  : 'dist',
-                unit_plausibility      : 'unit',
-            ]
-            def weightedTotal = { Map scoresByChannel ->
-                def num = 0.0
-                def den = 0.0
-                scoresByChannel.each { channel, score ->
-                    if (score == null) return
-                    def w = weights[shortKey[channel]]
-                    num += w * score
-                    den += w
-                }
-                return num / den
+            // The ranking property itself, now read straight off the parquet
+            // (I2 / I4): effective_weight already IS R15's redistribution
+            // (distribution_distance's excluded weight is already absent,
+            // proportionally folded into the other five), so a candidate's
+            // total is exactly sum(score * effective_weight) over its rows
+            // -- no hand-rolled --channel_weights map, no short-key mapping,
+            // needed here at all. The counterfactual only substitutes
+            // unit_plausibility's SCORE (not its effective_weight, which is
+            // unchanged by a real run's own set of "scored" channels) to
+            // isolate that unit_plausibility ALONE is what drags the real
+            // total down.
+            def scoredRows = byChannel.values().findAll { it.score != null }
+            assert Math.abs(scoredRows.sum { it.effective_weight } - 1.0) < 1.0e-9
+            def actualTotal = scoredRows.sum { it.score * it.effective_weight }
+            def counterfactualTotal = scoredRows.sum { row ->
+                def score = (row.channel == 'unit_plausibility') ? 0.9 : row.score
+                return score * row.effective_weight
             }
-            def actualScores = byChannel.collectEntries { channel, row -> [(channel): row.score] }
-            def actualTotal = weightedTotal(actualScores)
-            def counterfactualScores = actualScores + [unit_plausibility: 0.9]
-            def counterfactualTotal = weightedTotal(counterfactualScores)
             assert actualTotal < counterfactualTotal
 
             // §0 the invariant, re-checked directly: no evidence row is ever
@@ -192,6 +201,8 @@ print(json.dumps([dict(zip(cols, r)) for r in rows]))
             def weightValueOverlap = rows.find { it.candidate_key == weightKey && it.channel == 'value_overlap' }
             assert weightValueOverlap != null
             assert weightValueOverlap.score == null
+            assert weightValueOverlap.status == 'could-not-score' // fix round 1 (I4): the 3-value coarse status column
+            assert weightValueOverlap.effective_weight == 0.0
             def weightDetail = new groovy.json.JsonSlurper().parseText(weightValueOverlap.detail)
             assert weightDetail.status == 'no-signal'
             assert weightDetail.reason.contains('R14')
@@ -204,11 +215,15 @@ print(json.dumps([dict(zip(cols, r)) for r in rows]))
             def sexValueOverlap = rows.find { it.candidate_key == sexKey && it.channel == 'value_overlap' }
             assert sexValueOverlap != null
             assert sexValueOverlap.score == 1.0
+            assert sexValueOverlap.status == 'scored'
+            assert sexValueOverlap.effective_weight > 0.0
 
             // distribution_distance is excluded for EVERY candidate, sex and
             // weight alike -- R15 is unconditional in phase 0.
             rows.findAll { it.channel == 'distribution_distance' }.each {
                 assert it.score == null
+                assert it.status == 'no-reference'
+                assert it.effective_weight == 0.0
                 def d = new groovy.json.JsonSlurper().parseText(it.detail)
                 assert d.status == 'no-reference'
             }
@@ -278,13 +293,21 @@ print(json.dumps([dict(zip(cols, r)) for r in rows]))
             // absence from --enabled_channels is RECORDED, not silent.
             assert byChannel.size() == 6
             assert byChannel['cardinality'].score == null
+            assert byChannel['cardinality'].status == 'could-not-score' // fix round 1 (I4): disabled collapses into the same coarse status as no-signal
+            assert byChannel['cardinality'].effective_weight == 0.0
             def cardDetail = new groovy.json.JsonSlurper().parseText(byChannel['cardinality'].detail)
             assert cardDetail.status == 'disabled'
             assert cardDetail.reason.contains('enabled_channels')
 
-            // The channels that stayed enabled still score normally.
+            // The channels that stayed enabled still score normally, and
+            // their effective_weight is renormalised over the five that did
+            // score (cardinality's raw weight is excluded, not just its score).
             assert byChannel['type_agreement'].score != null
+            assert byChannel['type_agreement'].status == 'scored'
+            assert byChannel['type_agreement'].effective_weight > 0.0
             assert byChannel['name_similarity'].score != null
+            assert byChannel['name_similarity'].status == 'scored'
+            assert Math.abs(byChannel.values().findAll { it.score != null }.sum { it.effective_weight } - 1.0) < 1.0e-9
         }
     }
 }

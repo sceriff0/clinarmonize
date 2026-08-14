@@ -33,17 +33,24 @@ The same "no-signal is None, not 0" rule is applied uniformly to every other
 channel's own structural gaps (an empty column, a derived variable with no
 declared type, a truncated unique-value set, a channel disabled via
 --enabled_channels) for the same reason R14 gives: a channel that never
-looked must never read like a channel that looked and disapproved. A caller
-(§4.3's ledger, not built in this phase) sums score * weight only over rows
-where score is not null, redistributing the disabled/no-signal channels'
-weight proportionally across the ones that did score -- exactly R15's rule,
-generalised.
+looked must never read like a channel that looked and disapproved.
+
+Fix round 1 (I4 / Ruling R23): R15's redistribution rule -- "excluded from
+the weighted total, with its weight redistributed proportionally across the
+channels that did score" -- is not left for a caller to re-derive. Every row
+also carries a coarse `status` ("scored" / "no-reference" / "could-not-score")
+and an `effective_weight`: for a "scored" row, --channel_weights' entry for
+that channel, renormalised over only the "scored" rows for that SAME
+candidate; 0.0 for every excluded row. A caller (§4.3's ledger) can then
+compute a candidate's total as plain `sum(score * effective_weight)` over its
+rows -- a pure function of this parquet, never a rule two tasks must
+independently remember.
 
 Not here (nogo, per the card): never accepts a proposal (this script only
 scores candidates §4.1 already proposed); never tunes channel_weights
-against a downstream model's performance (channel_weights is a pass-through
-param, read only to annotate the confirmation plot, never fit here). Never
-lets a channel read a column the pack marks outcome: true -- structurally
+against a downstream model's performance -- channel_weights is read only to
+compute each row's effective_weight above, never fit against anything.
+Never lets a channel read a column the pack marks outcome: true -- structurally
 impossible here (candidates.parquet already excludes every outcome-flagged
 variable, per §4.1's own nogo), and independently re-checked below
 (_assert_never_outcome) precisely because this is the task the brief flags
@@ -416,6 +423,22 @@ CHANNEL_REGISTRY = {
     "unit_plausibility": score_unit_plausibility,
 }
 
+# Fix round 1 (I2): the ONE machine-readable home for the card's short
+# --channel_weights keys (name/type/card/value/dist/unit, verbatim from the
+# Params table) mapped to CHANNEL_REGISTRY's long channel ids. Nothing else
+# in this file, its caller, or tests/propose_channels.nf.test restates this
+# mapping -- effective_weight below is computed from it once, here, and
+# every other consumer (the test, eventually §4.3) reads effective_weight
+# off evidence.parquet rather than re-deriving the mapping itself.
+CHANNEL_WEIGHT_KEY = {
+    "name_similarity": "name",
+    "type_agreement": "type",
+    "cardinality": "card",
+    "value_overlap": "value",
+    "distribution_distance": "dist",
+    "unit_plausibility": "unit",
+}
+
 
 def EvidenceChannel_score(channel_id: str, column_profile: dict, variable: dict, params: dict) -> tuple[float | None, dict]:
     return CHANNEL_REGISTRY[channel_id](column_profile, variable, params)
@@ -497,22 +520,64 @@ def _parse_cohort_dataset(profile_path: str) -> tuple[str, str]:
     return cohort_id, dataset_id
 
 
+# Fix round 1 (I4 / Ruling R23): the 4-value `status` a channel's own detail
+# dict carries ("scored", "no-reference", "no-signal", "disabled") collapses
+# to the 3-value column the ruling names -- "no-signal" and "disabled" are
+# both species of "we never evaluated this candidate at all", which is the
+# distinction that matters for weight redistribution (both get 0.0 below);
+# "no-reference" stays its own value because it is R15's specific case.
+def _coarse_status(detail_status: str) -> str:
+    if detail_status == "scored":
+        return "scored"
+    if detail_status == "no-reference":
+        return "no-reference"
+    return "could-not-score"
+
+
+# Fix round 1 (I4 / Ruling R23): R15's redistribution, computed ONCE per
+# candidate so a caller never has to. channel_weights' short keys are
+# resolved to channel ids via CHANNEL_WEIGHT_KEY (I2); a "scored" channel's
+# effective_weight is its raw weight divided by the sum of raw weights over
+# every "scored" channel for this SAME candidate (so the six effective
+# weights for one candidate sum to 1.0, or are all 0.0 in the degenerate
+# case where nothing scored at all); every "no-reference" or
+# "could-not-score" row gets 0.0 -- excluded, never a silent share of the
+# total.
+def _effective_weights(channel_statuses: dict[str, str], channel_weights: dict[str, float]) -> dict[str, float]:
+    raw_weight = {
+        channel_id: channel_weights[CHANNEL_WEIGHT_KEY[channel_id]] for channel_id in CHANNEL_REGISTRY
+    }
+    scored_total = sum(raw_weight[c] for c, status in channel_statuses.items() if status == "scored")
+    effective: dict[str, float] = {}
+    for channel_id, status in channel_statuses.items():
+        if status == "scored" and scored_total > 0:
+            effective[channel_id] = raw_weight[channel_id] / scored_total
+        else:
+            effective[channel_id] = 0.0
+    return effective
+
+
 def _write_evidence_parquet(rows: list[dict], out_path: str) -> None:
     con = duckdb.connect()
     con.execute(
         """
         CREATE TABLE evidence (
-            candidate_key VARCHAR,
-            channel       VARCHAR,
-            score         DOUBLE,
-            detail        VARCHAR
+            candidate_key    VARCHAR,
+            channel          VARCHAR,
+            score            DOUBLE,
+            detail           VARCHAR,
+            status           VARCHAR,
+            effective_weight DOUBLE
         )
         """
     )
     if rows:
         con.executemany(
-            "INSERT INTO evidence VALUES (?, ?, ?, ?)",
-            [(r["candidate_key"], r["channel"], r["score"], r["detail"]) for r in rows],
+            "INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (r["candidate_key"], r["channel"], r["score"], r["detail"], r["status"], r["effective_weight"])
+                for r in rows
+            ],
         )
     con.execute(f"COPY evidence TO '{out_path}' (FORMAT PARQUET)")
 
@@ -553,10 +618,13 @@ def main(argv: list[str] | None = None) -> int:
     enabled_channels = set(channel_params["enabled_channels"])
     unit_factor_candidates = channel_params["unit_factor_candidates"]
     emit_confirmation_plots = channel_params["emit_confirmation_plots"]
-    # channel_weights is read only to decide bar order/labelling parity with
-    # the card's Contract table for the confirmation plot; §4.2's nogo
-    # forbids tuning it against anything, and this script never combines
-    # channels into a total at all -- that ranking step is §4.3's (Task 5c).
+    # Fix round 1 (I1 / I4): channel_weights IS read now -- to compute each
+    # row's effective_weight (R15's redistribution, precomputed once here
+    # rather than left for every future consumer to re-derive; see
+    # _effective_weights above). Still never fit against anything (§4.2's
+    # own nogo); still no total is computed or ranked here -- only the
+    # per-row weight a total would use.
+    channel_weights = channel_params["channel_weights"]
     scorer_params = {
         "unit_factor_candidates": unit_factor_candidates,
         # §5 confirm does not exist in this phase (Ruling R15): there is no
@@ -597,6 +665,8 @@ def main(argv: list[str] | None = None) -> int:
         candidate_key = f"{cohort_id}::{dataset_id}::{column}::{variable_name}"
 
         channel_scores: list[tuple[str, float | None, dict]] = []
+        channel_details: dict[str, dict] = {}
+        channel_statuses: dict[str, str] = {}
         for channel_id in CHANNEL_REGISTRY:
             if channel_id not in enabled_channels:
                 # §4.2 Params: "disabling one is recorded in the ledger, not
@@ -607,12 +677,21 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 score, detail = EvidenceChannel_score(channel_id, profile, variable, scorer_params)
             channel_scores.append((channel_id, score, detail))
+            channel_details[channel_id] = detail
+            channel_statuses[channel_id] = _coarse_status(detail["status"])
+
+        # Fix round 1 (I4 / Ruling R23): R15's redistribution, computed once
+        # per candidate over its six channel statuses just gathered above.
+        effective_weights = _effective_weights(channel_statuses, channel_weights)
+        for channel_id, score, detail in channel_scores:
             evidence_rows.append(
                 {
                     "candidate_key": candidate_key,
                     "channel": channel_id,
                     "score": score,
                     "detail": json.dumps(detail, sort_keys=True),
+                    "status": channel_statuses[channel_id],
+                    "effective_weight": effective_weights[channel_id],
                 }
             )
 

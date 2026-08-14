@@ -11,13 +11,19 @@
 # is the NON-outcome day-unit variable §4.2's done-when needs to score
 # OS_MONTHS against.
 #
-# os_days' domain_values is deliberately the exact set of values
-# profiling_fixture.csv's OS_MONTHS column carries: this is a synthetic
-# fixture built to exercise value_overlap (Jaccard against a variable's
-# domain_values, Ruling R14) even for a continuous variable, not a claim
-# about what a real "days" concept's legal value set looks like. Every
-# value is a plain number; no disease term, gene symbol or cohort name
-# anywhere in this file (§10.3).
+# os_days' domain_values is a PARTIAL overlap with OS_MONTHS's 20 observed
+# values, deliberately (fix round 1, I3): 12 of the 20 values OS_MONTHS
+# actually carries, plus 8 values it never carries (all >60, well outside
+# OS_MONTHS's 0.0..60.0 range, so no accidental overlap). Still 20 entries
+# total, so cardinality's domain_values branch (expected_cardinality == 20,
+# matching n_unique == 20) stays ~1.0, unaffected -- but value_overlap's
+# Jaccard is now 12 / (20 + 20 - 12) = 12/28 ~= 0.4286, genuinely lower.
+# A verbatim-copied domain_values list pinned BOTH channels at exactly 1.0
+# by construction, which is the card's own Trap made real ("if two channels
+# move together under every perturbation, you have five") -- this shape
+# lets them diverge instead, which tests/propose_channels.nf.test now
+# asserts directly. Every value is a plain number; no disease term, gene
+# symbol or cohort name anywhere in this file (§10.3).
 pack: propose-channels-fixture-generic
 version: 0.1.0
 vocabulary: test-vocab-2026
@@ -28,6 +34,7 @@ variables:
     type: continuous
     unit: d
     domain_values:
+      # the 12 values OS_MONTHS actually carries (of its 20)
       - "0.0"
       - "3.2"
       - "6.3"
@@ -40,14 +47,15 @@ variables:
       - "28.4"
       - "31.6"
       - "34.7"
-      - "37.9"
-      - "41.1"
-      - "44.2"
-      - "47.4"
-      - "50.5"
-      - "53.7"
-      - "56.8"
-      - "60.0"
+      # 8 values OS_MONTHS never carries (all outside its 0.0..60.0 range)
+      - "100.0"
+      - "110.5"
+      - "120.3"
+      - "130.7"
+      - "140.2"
+      - "150.9"
+      - "160.4"
+      - "170.6"
   - name: study_endpoint
     domain: derived
     derivation: survival_time
