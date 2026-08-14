@@ -394,8 +394,16 @@ workflow CLINICALHARMONIZE {
     def seeds = parseSeedSpec(permute_outcome_seed)
     def isInvariantRun = !seeds.isEmpty()
 
+    // The exemption is bound to the ONE stage the harness is declared to
+    // hold its claim over -- invariant_scope -- and to nothing else. Any
+    // other --stop_after keeps the gate, so `--permute_outcome_seed 1..100
+    // --stop_after emit` is still refused today, and once the proposer
+    // exists `--stop_after map` will still be refused rather than reporting
+    // [SUCCESS] with 'map' never having run. The bypass covers exactly the
+    // measurement it was written for.
     def firstMissingStage = firstUnimplementedStage(graph)
-    if (!isInvariantRun && firstMissingStage != null && graph.indexOf(targetStage) >= graph.indexOf(firstMissingStage)) {
+    def isInvariantScopeRun = isInvariantRun && targetStage == invariant_scope
+    if (!isInvariantScopeRun && firstMissingStage != null && graph.indexOf(targetStage) >= graph.indexOf(firstMissingStage)) {
         requireStageImplemented(firstMissingStage)
     }
     if (isInvariantRun && graph.indexOf(targetStage) < graph.indexOf('profile')) {
@@ -508,7 +516,9 @@ workflow CLINICALHARMONIZE {
             // them would force a rename that loses the only thing the
             // report needs them keyed by -- which replicate produced which.
             ch_ledgers.map { replicate, ledger -> "${replicate}=${sha256Hex(ledger.bytes)}" }.toSortedList(),
-            permute_outcome_seed.toString(),
+            // The resolved seed list, not the raw spec: parseSeedSpec()
+            // above is the pipeline's only parser for `int or range`.
+            seeds,
             invariant_n_permutations,
             invariant_scope,
         )

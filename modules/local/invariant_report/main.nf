@@ -26,7 +26,12 @@ process INVARIANT_REPORT {
     input:
     path permutation_manifests, stageAs: 'permutations_in/*'
     val  ledger_hashes
-    val  seed_spec
+    // The RESOLVED seed list, not the raw --permute_outcome_seed spec.
+    // parseSeedSpec() in workflows/harmonize.nf is this pipeline's only
+    // parser for the card's `int or range`; handing the spec over here
+    // would mean a second one, and two parsers of one grammar are two
+    // grammars as soon as either is edited.
+    val  seeds
     val  n_required
     val  scope
 
@@ -42,7 +47,7 @@ process INVARIANT_REPORT {
     """
     invariant_report.py \\
         --permutation-glob 'permutations_in/*.json' \\
-        --seed-spec '${seed_spec}' \\
+        --seeds '${seeds.join(',')}' \\
         --n-required ${n_required} \\
         --scope '${scope}' \\
         --out-report report.json \\

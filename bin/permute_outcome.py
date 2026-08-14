@@ -67,6 +67,15 @@ def column_rng(seed: int, cohort_id: str, dataset_id: str, column: str) -> rando
     return random.Random(int.from_bytes(hashlib.sha256(material).digest()[:8], "big"))
 
 
+def read_table(path: str) -> list[list[str]]:
+    """Every read of a CSV in this module goes through here, including the
+    re-read of what we just wrote. The permuted table is verified as BYTES on
+    disk, not as the in-memory list we believe we wrote, because the thing the
+    proposer will actually consume is the file."""
+    with open(path, newline="", encoding="utf-8", errors="surrogateescape") as fh:
+        return list(csv.reader(fh))
+
+
 def _sha256(values: list[str]) -> str:
     h = hashlib.sha256()
     for value in values:
@@ -109,19 +118,46 @@ def main(argv: list[str] | None = None) -> int:
     targets = outcome_variables(args.pack)
     wanted = {canonical(name) for name in targets}
 
-    with open(args.table, newline="", encoding="utf-8", errors="surrogateescape") as fh:
-        rows = list(csv.reader(fh))
+    rows = read_table(args.table)
 
     if not rows:
         print(f"refusing to permute an empty table: {args.table}", file=sys.stderr)
         return 1
 
     header, body = rows[0], rows[1:]
+
+    # A ragged row is refused, not repaired. csv.reader accepts one silently,
+    # and a short row would make the write-back lossy: the shuffled value
+    # aimed at a missing cell has nowhere to land, so the table on disk would
+    # lose a real value and keep a phantom empty one -- a DIFFERENT value
+    # under every seed. That is a permutation that moves the cohort's outcome
+    # marginal (the §10.1 Trap) arriving through the CSV parser rather than
+    # through the shuffle, and this module's nogo ("never converts, rounds,
+    # retypes or reformats a value") is only true if it cannot happen.
+    ragged = [n for n, row in enumerate(body, start=2) if len(row) != len(header)]
+    if ragged:
+        print(
+            f"refusing to permute a ragged table: {args.table} has {len(header)} header "
+            f"field(s) but line(s) {', '.join(str(n) for n in ragged[:5])}"
+            f"{' ...' if len(ragged) > 5 else ''} differ. Permuting a ragged column "
+            f"cannot preserve its marginal.",
+            file=sys.stderr,
+        )
+        return 1
+
     indices = [i for i, name in enumerate(header) if canonical(name) in wanted]
-    originals = {i: [row[i] if i < len(row) else "" for row in body] for i in indices}
+    originals = {i: [row[i] for row in body] for i in indices}
+
+    # The marginal of the column AS GIVEN, hashed once before anything is
+    # shuffled. This -- not the shuffle's own output -- is what every
+    # replicate's written column is checked against below. Hashing
+    # sorted(shuffle(x)) against sorted(x) computed from the same list is an
+    # identity and can never fail; hashing the bytes that reached disk against
+    # the bytes that arrived can, which is the only version of this guard
+    # worth having.
+    baseline_marginal = {i: _sha256(sorted(originals[i])) for i in indices}
 
     for seed in seeds:
-        permuted: list[dict] = []
         for index in indices:
             column = header[index]
 
@@ -142,28 +178,63 @@ def main(argv: list[str] | None = None) -> int:
             column_rng(seed, args.cohort_id, args.dataset_id, column).shuffle(shuffled)
 
             for row, value in zip(body, shuffled):
-                if index < len(row):
-                    row[index] = value
+                row[index] = value
+
+        out_table = f"{args.out_prefix}.p{seed}.csv"
+        with open(out_table, "w", newline="", encoding="utf-8", errors="surrogateescape") as fh:
+            writer = csv.writer(fh, lineterminator="\n")
+            writer.writerow(header)
+            writer.writerows(body)
+
+        # Re-read the file just written and measure THAT. Everything reported
+        # about this replicate is a measurement of the artefact the rest of
+        # the pipeline will read, so a value lost, duplicated, retyped or
+        # reformatted between the shuffle and the disk is caught here rather
+        # than being reported as a preserved marginal.
+        written = read_table(out_table)
+        if not written or written[0] != header:
+            print(f"refusing: {out_table} did not round-trip its header", file=sys.stderr)
+            return 1
+        written_body = written[1:]
+        if len(written_body) != len(body):
+            print(
+                f"refusing: {out_table} has {len(written_body)} data row(s), "
+                f"{args.table} had {len(body)}",
+                file=sys.stderr,
+            )
+            return 1
+
+        permuted: list[dict] = []
+        for index in indices:
+            column = header[index]
+            values = [row[index] if index < len(row) else "" for row in written_body]
+            marginal = _sha256(sorted(values))
+            if marginal != baseline_marginal[index]:
+                print(
+                    f"refusing: column '{column}' of {out_table} (seed {seed}) does not "
+                    f"carry the same multiset of values as {args.table}. The permutation "
+                    f"moved this cohort's outcome marginal, which is the one thing it "
+                    f"must never do (§10.1 Trap).",
+                    file=sys.stderr,
+                )
+                return 1
 
             permuted.append(
                 {
                     "column": column,
-                    "n_rows": len(shuffled),
-                    # The multiset, order-independent: identical under every
-                    # seed iff the permutation stayed inside this table.
-                    # This is the Trap's assertion, made checkable.
-                    "marginal_sha256": _sha256(sorted(shuffled)),
-                    # The same values in row order: MUST differ between
-                    # seeds, or the "permutation" was a no-op and the
+                    "n_rows": len(values),
+                    # The marginal of the INPUT column, and the marginal of
+                    # the column as written. They are recorded separately and
+                    # compared above so the report carries both sides of the
+                    # comparison rather than one side twice.
+                    "baseline_marginal_sha256": baseline_marginal[index],
+                    "marginal_sha256": marginal,
+                    # The same written values in row order: MUST differ
+                    # between seeds, or the "permutation" was a no-op and the
                     # harness is measuring nothing.
-                    "ordered_sha256": _sha256(shuffled),
+                    "ordered_sha256": _sha256(values),
                 }
             )
-
-        with open(f"{args.out_prefix}.p{seed}.csv", "w", newline="", encoding="utf-8", errors="surrogateescape") as fh:
-            writer = csv.writer(fh, lineterminator="\n")
-            writer.writerow(header)
-            writer.writerows(body)
 
         manifest = {
             "replicate": seed,

@@ -20,6 +20,16 @@ nextflow_pipeline {
 
     test("100 permutations of the outcome within each cohort yield exactly one ledger hash") {
 
+        // tests/invariant/report.json is the path the §10.1 contract names,
+        // so it lives under projectDir and OUTSIDE $outputDir -- which means
+        // nothing clears it between runs. Delete it here, so a green
+        // assertion below can only have been produced by THIS run. A test
+        // whose pass can be served by a file an earlier invocation left on
+        // disk is not measuring this run.
+        setup {
+            new File("${baseDir}/tests/invariant/report.json").delete()
+        }
+
         when {
             params {
                 outdir               = "$outputDir"
@@ -37,7 +47,20 @@ nextflow_pipeline {
                 .parse(new File("$baseDir/tests/invariant/report.json"))
 
             // The card's OUT slot, verbatim: {n_permutations, n_distinct_hashes}.
+            // n_permutations counts the replicates the run was OBSERVED to
+            // permute, not the seeds it was asked for, so this cannot be
+            // satisfied by the CLI string alone.
             assert report.n_permutations == 100
+            assert report.n_seeds_requested == 100
+
+            // Every cohort was permuted in EVERY replicate, and every
+            // permuted column carried its input column's multiset. Without
+            // these, "one hash across 100 replicates" could be one hash
+            // across 99 replicates nothing ever happened to.
+            assert report.cohorts_without_outcome_column == []
+            assert report.cohorts_with_incomplete_replicates == [:]
+            assert report.marginal_moved == []
+            assert report.no_op_permutations == []
 
             // The assertion itself: len(set(hashes)) == 1. Not "mostly agree"
             // (§10.1 nogo) -- one hash, or this is a schema-level leak.
@@ -52,6 +75,16 @@ nextflow_pipeline {
     }
 
     test("the permutation preserves each cohort's outcome marginal and changes only its pairing") {
+
+        // tests/invariant/report.json is the path the §10.1 contract names,
+        // so it lives under projectDir and OUTSIDE $outputDir -- which means
+        // nothing clears it between runs. Delete it here, so a green
+        // assertion below can only have been produced by THIS run. A test
+        // whose pass can be served by a file an earlier invocation left on
+        // disk is not measuring this run.
+        setup {
+            new File("${baseDir}/tests/invariant/report.json").delete()
+        }
 
         when {
             params {
@@ -78,23 +111,49 @@ nextflow_pipeline {
             // guarding against.
             assert report.cohorts_without_outcome_column == []
 
+            // Every replicate permuted every cohort. Coverage summed across
+            // replicates would let one permuted replicate vouch for the rest.
+            assert report.cohorts_with_incomplete_replicates == [:]
+            assert report.n_permutations == 3
+
             records.groupBy { [it.cohort_id, it.dataset_id, it.column] }.each { key, group ->
                 assert group.size() == 3  // one record per seed
 
                 // §10.1 Trap: permuting WITHIN each cohort preserves that
-                // cohort's outcome marginal. The multiset of values is
-                // byte-identical under every seed.
-                assert group*.marginal_sha256.toSet().size() == 1
+                // cohort's outcome marginal. marginal_sha256 is hashed from
+                // the column as WRITTEN to the permuted CSV and
+                // baseline_marginal_sha256 from the column as READ from the
+                // input table, so this compares two independently produced
+                // multisets. (Comparing a shuffle's own output against
+                // itself is the identity sorted(perm(X)) == sorted(X) and
+                // can never fail; that guard would prove nothing.)
+                group.each { record ->
+                    assert record.baseline_marginal_sha256 != null
+                    assert record.marginal_sha256 == record.baseline_marginal_sha256
+                }
+                assert report.marginal_moved == []
 
                 // ...and the permutation is real: the row-ORDER pairing
                 // differs between seeds. A no-op "permutation" would leave
-                // both hashes constant and prove nothing.
+                // both hashes constant and prove nothing, which the report
+                // now refuses to certify as well.
                 assert group*.ordered_sha256.toSet().size() > 1
+                assert report.no_op_permutations == []
             }
         }
     }
 
     test("a cohort set with no column matching the pack's outcome variable is refused, not silently proved") {
+
+        // tests/invariant/report.json is the path the §10.1 contract names,
+        // so it lives under projectDir and OUTSIDE $outputDir -- which means
+        // nothing clears it between runs. Delete it here, so a green
+        // assertion below can only have been produced by THIS run. A test
+        // whose pass can be served by a file an earlier invocation left on
+        // disk is not measuring this run.
+        setup {
+            new File("${baseDir}/tests/invariant/report.json").delete()
+        }
 
         when {
             params {
@@ -119,6 +178,40 @@ nextflow_pipeline {
             assert report.cohorts_without_outcome_column == ["COHORT_NO_OUTCOME"]
             assert report.verdict == "no-outcome-column"
             assert report.permutations == []
+
+            // Nothing was permuted, so the observed permutation count is
+            // zero even though two seeds were requested. Reporting the
+            // requested count here would let a run that permuted nothing
+            // claim it permuted two.
+            assert report.n_permutations == 0
+            assert report.n_seeds_requested == 2
+        }
+    }
+
+    test("the harness's stage-gate exemption covers only its own scope, not every later stage") {
+        // The exemption exists because the harness's measurement IS which
+        // contract output the unbuilt proposer failed to produce, so
+        // --stop_after propose (== invariant_scope) must be allowed through.
+        // It is bound to that stage and nothing else: a seeded run aimed
+        // past it stays refused, so `--permute_outcome_seed 1..100
+        // --stop_after map` cannot report [SUCCESS] with 'map' never having
+        // run once the proposer lands.
+
+        when {
+            params {
+                outdir               = "$outputDir"
+                stop_after           = "map"
+                input                = "$baseDir/test_data/fixtures/invariant_samplesheet.csv"
+                permute_outcome_seed = "1..2"
+                max_failed_frac      = 0.5
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def stderr = (workflow.stdout + workflow.stderr).join('\n')
+            assert stderr.contains('not implemented')
+            assert workflow.trace.tasks().size() == 0
         }
     }
 }

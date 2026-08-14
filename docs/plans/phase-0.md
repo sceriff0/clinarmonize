@@ -29,7 +29,7 @@ whether the task text repeats them.
 6. **§0.5 principle 3.** Standalone execution: green under `-profile test,docker`
    with no sibling pipeline installed.
 7. **Build behind the `alts` seam** even when only one alternative exists today.
-8. **Toolchain pins** (§0.8, as built): Nextflow 25.04.7 · nf-core/tools 4.1.0 ·
+8. **Toolchain pins** (§0.8, as built): Nextflow 26.04.6 · nf-core/tools 4.1.0 ·
    nf-test 0.9.5 · DuckDB 1.5.5 · Quarto 1.7.33. Do not introduce a dependency
    outside these without saying so in the report.
 
