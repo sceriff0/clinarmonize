@@ -41,16 +41,25 @@ nextflow_pipeline {
             // A clean stop (Nextflow's error() idiom, same as
             // resolveHoldoutLock/requireStageImplemented elsewhere in this
             // repo) is still workflow.success == false -- "cleanly" means a
-            // single clear message, never a bare stack trace. Note: DSL2
-            // builds the whole dataflow graph by executing the workflow
-            // script top-to-bottom BEFORE any task is actually scheduled
-            // (the same reason requireStageImplemented's OWN refusal always
-            // shows completed=0, regardless of which stage it names) -- so
-            // "stops after propose" is a STAGE-GRAPH position (the request
-            // was for 'confirm', which sits after 'propose'), not a claim
-            // that ledger.proposed.yaml is already on disk when this
-            // error() fires.
+            // single clear message, never a bare stack trace.
+            //
+            // Fix round 2 (I2): the gate's `error()` is now a `.subscribe`
+            // on the baseline ledger channel, not an eager check at
+            // graph-construction time, precisely so 'propose' actually
+            // completes first. "stops after propose" is therefore no longer
+            // just a stage-graph position -- see the next assertion, which
+            // proves ledger.proposed.yaml is genuinely on disk when this
+            // error() fires, not merely that the request named a later
+            // stage.
             assert !workflow.success
+
+            // The file the message tells the user to copy from must be the
+            // file the run actually produced. Before the I2 fix this file
+            // never existed, because the gate fired before PROPOSE_LEDGER
+            // ever ran.
+            def proposedLedger = new File("$outputDir/ledger.proposed.yaml")
+            assert proposedLedger.exists()
+            assert proposedLedger.text.trim().length() > 0
 
             // "after propose", not "before propose can even be requested":
             // the refusal message is specifically the confirm gate's own

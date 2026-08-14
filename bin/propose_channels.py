@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
 import json
 import math
 import os
@@ -456,7 +457,20 @@ _UNSAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def _sanitize_filename(candidate_key: str) -> str:
-    return _UNSAFE_FILENAME_RE.sub("_", candidate_key)
+    # Fix round 2 (I3): collapsing every non-[A-Za-z0-9_.-] run to a single
+    # "_" is not injective -- two distinct candidate_keys differing only in
+    # characters outside that set (e.g. different punctuation) would sanitise
+    # to the same stem, so one candidate's plot would silently overwrite the
+    # other's and propose_ledger.py:133 would then point BOTH candidates at
+    # one SVG. Appending a short digest of the FULL, un-sanitised
+    # candidate_key makes the mapping injective (sha256 collisions are not a
+    # concern at this scale) while staying a pure, deterministic function of
+    # candidate_key -- same input always yields the same filename, across
+    # runs and across replicates, which is what §10.1's invariant test and
+    # the ledger-hash contract both require.
+    stem = _UNSAFE_FILENAME_RE.sub("_", candidate_key)
+    digest = hashlib.sha256(candidate_key.encode("utf-8")).hexdigest()[:8]
+    return f"{stem}-{digest}"
 
 
 def _svg_escape(s: str) -> str:

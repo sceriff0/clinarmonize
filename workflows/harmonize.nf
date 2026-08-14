@@ -768,9 +768,17 @@ workflow CLINICALHARMONIZE {
     def ch_confirmed = channel.empty()
 
     if (graph.indexOf(targetStage) >= graph.indexOf('confirm')) {
+        // The baseline's own ledger.proposed.yaml -- ch_ledgers already
+        // carries it (replicate == null), so this is a second reference to
+        // the SAME broadcast channel PROPOSE_LEDGER filled above, not a
+        // second read of the file from disk.
+        def ch_baseline_ledger = ch_ledgers
+            .filter { replicate, ledger -> replicate == null }
+            .map { replicate, ledger -> ledger }
+
         //
-        // The human gate itself: null --confirmed_ledger stops the run
-        // HERE, with a clear message naming the path to write, under EVERY
+        // The human gate itself: null --confirmed_ledger stops the run,
+        // with a clear message naming the path to write, under EVERY
         // profile, -profile test included. This is the ONLY place that
         // check lives (never inside CONFIRM_LEDGER's own script) precisely
         // so the auto-confirm boundary this card's brief warns about cannot
@@ -780,56 +788,65 @@ workflow CLINICALHARMONIZE {
         // nothing besides a real, human-authored file on disk can ever
         // make this `if` false.
         //
+        // Fix round 2 (I2): the refusal used to be an eager error() fired
+        // the instant this line was reached -- but DSL2 builds the WHOLE
+        // dataflow graph by executing this script top-to-bottom BEFORE any
+        // task is actually scheduled (same reasoning requireStageImplemented's
+        // own comment gives above), so an eager error() here aborted the run
+        // before PROPOSE_LEDGER ever executed, and the message pointed the
+        // user at a ledger.proposed.yaml that had never been written. The
+        // check is now a `.subscribe` on ch_baseline_ledger instead: it only
+        // fires once PROPOSE_LEDGER's baseline task has actually completed
+        // (and its publishDir copy of ledger.proposed.yaml with it), so
+        // 'propose' genuinely finishes and the path named in the message
+        // exists on disk by the time the run stops.
+        //
         if (!confirmed_ledger) {
-            def suggestedPath = "${outdir}/ledger.confirmed.yaml"
-            error(
-                "No confirmed ledger. §5's human gate requires a reviewed decision " +
-                "(accept/reject/remap/defer) for every column in '${outdir}/ledger.proposed.yaml' " +
-                "before the pipeline can proceed past 'propose'. Copy that file to " +
-                "'${suggestedPath}', add decision/variable/concept_id/confirmed_by/rationale/" +
-                "proposed_hash for each row, then re-run with --confirmed_ledger ${suggestedPath}."
+            ch_baseline_ledger.subscribe { ledgerFile ->
+                def suggestedPath = "${outdir}/ledger.confirmed.yaml"
+                error(
+                    "No confirmed ledger. §5's human gate requires a reviewed decision " +
+                    "(accept/reject/remap/defer) for every column in '${outdir}/ledger.proposed.yaml' " +
+                    "before the pipeline can proceed past 'propose'. Copy that file to " +
+                    "'${suggestedPath}', add decision/variable/concept_id/confirmed_by/rationale/" +
+                    "proposed_hash for each row, then re-run with --confirmed_ledger ${suggestedPath}."
+                )
+            }
+        } else {
+            def confirmParamsJson = buildConfirmParamsJson(require_rationale, allow_stale_ledger)
+
+            CONFIRM_LEDGER(
+                file(confirmed_ledger, checkIfExists: true),
+                ch_baseline_ledger,
+                confirmParamsJson,
             )
-        }
+            ch_versions = ch_versions.mix(CONFIRM_LEDGER.out.versions)
 
-        def confirmParamsJson = buildConfirmParamsJson(require_rationale, allow_stale_ledger)
+            def compileParamsJson = buildCompileParamsJson(rule_id_prefix, fail_on_rule_collision)
+            // rule_version is the PACK version that produced it (§5.2
+            // Contract) -- a second, small read of the same pack YAML
+            // loadPackForPropose already read above, same reasoning that
+            // function's own comment gives (not a second source of truth,
+            // just a second read).
+            def packVersionForRules = new org.yaml.snakeyaml.Yaml().load(file(resolvePackPath(concept_pack)).text).version
 
-        // The baseline's own ledger.proposed.yaml -- ch_ledgers already
-        // carries it (replicate == null), so this is a second reference to
-        // the SAME broadcast channel PROPOSE_LEDGER filled above, not a
-        // second read of the file from disk.
-        def ch_baseline_ledger = ch_ledgers
-            .filter { replicate, ledger -> replicate == null }
-            .map { replicate, ledger -> ledger }
+            COMPILE_RULES(
+                CONFIRM_LEDGER.out.decisions,
+                compileParamsJson,
+                packVersionForRules,
+            )
+            ch_versions = ch_versions.mix(COMPILE_RULES.out.versions)
 
-        CONFIRM_LEDGER(
-            file(confirmed_ledger, checkIfExists: true),
-            ch_baseline_ledger,
-            confirmParamsJson,
-        )
-        ch_versions = ch_versions.mix(CONFIRM_LEDGER.out.versions)
-
-        def compileParamsJson = buildCompileParamsJson(rule_id_prefix, fail_on_rule_collision)
-        // rule_version is the PACK version that produced it (§5.2 Contract)
-        // -- a second, small read of the same pack YAML loadPackForPropose
-        // already read above, same reasoning that function's own comment
-        // gives (not a second source of truth, just a second read).
-        def packVersionForRules = new org.yaml.snakeyaml.Yaml().load(file(resolvePackPath(concept_pack)).text).version
-
-        COMPILE_RULES(
-            CONFIRM_LEDGER.out.decisions,
-            compileParamsJson,
-            packVersionForRules,
-        )
-        ch_versions = ch_versions.mix(COMPILE_RULES.out.versions)
-
-        // ch_confirmed, matching s5-1's own OUT slot literally: each
-        // compiled rule re-shaped into [cohort_id, dataset_id, column,
-        // variable, concept_id, rule_id]. rule_id is READ from §5.2's own
-        // output here, never re-derived -- there is exactly one place in
-        // this pipeline that computes a rule_id (bin/compile_rules.py).
-        ch_confirmed = COMPILE_RULES.out.ruleset.flatMap { rulesetFile ->
-            new groovy.json.JsonSlurper().parse(rulesetFile).collect { rule ->
-                [rule.from.cohort_id, rule.from.dataset_id, rule.from.column, rule.to.variable, rule.to.concept_id, rule.rule_id]
+            // ch_confirmed, matching s5-1's own OUT slot literally: each
+            // compiled rule re-shaped into [cohort_id, dataset_id, column,
+            // variable, concept_id, rule_id]. rule_id is READ from §5.2's
+            // own output here, never re-derived -- there is exactly one
+            // place in this pipeline that computes a rule_id
+            // (bin/compile_rules.py).
+            ch_confirmed = COMPILE_RULES.out.ruleset.flatMap { rulesetFile ->
+                new groovy.json.JsonSlurper().parse(rulesetFile).collect { rule ->
+                    [rule.from.cohort_id, rule.from.dataset_id, rule.from.column, rule.to.variable, rule.to.concept_id, rule.rule_id]
+                }
             }
         }
     }

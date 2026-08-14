@@ -96,7 +96,17 @@ nextflow_pipeline {
 
             // confirmation_plot points at the SAME sanitised-candidate-key
             // SVG §4.2 (Ruling R16) actually wrote -- not a guessed path.
-            assert proposal.confirmation_plot == 'propose/confirmation_plots/COHORT_PROFILE_profile_test_OS_MONTHS_os_days.svg'
+            //
+            // I3 fix: the filename is the sanitised candidate_key PLUS an
+            // 8-hex-char sha256 digest of the full, un-sanitised
+            // candidate_key (bin/propose_channels.py's _sanitize_filename),
+            // computed here the same way rather than hard-coded, since that
+            // digest is what makes two distinct candidates' plots injective.
+            def candidateKey = "${osMonthsEntry.cohort_id}::${osMonthsEntry.dataset_id}::${osMonthsEntry.column}::${proposal.variable}"
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+                .digest(candidateKey.getBytes('UTF-8'))
+                .collect { String.format('%02x', it) }.join('').substring(0, 8)
+            assert proposal.confirmation_plot == "propose/confirmation_plots/COHORT_PROFILE_profile_test_OS_MONTHS_os_days-${digest}.svg"
             assert new File("$outputDir/${proposal.confirmation_plot}").exists()
 
             // §0 the invariant: the pack's outcome variable never appears as

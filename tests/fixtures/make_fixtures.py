@@ -545,7 +545,7 @@ def confirm_ledger_valid(target_dir: Path) -> Path:
             "unit_in": "month",  # the header/name reads as months; os_days' declared unit is days (d) -- a genuine mismatch for §6/map to reconcile later
             "confirmed_by": "a.reviewer",
             "rationale": "os_days evidence dominates the ranked proposals; OS_MONTHS' header and observed range both read as months",
-            "proposed_hash": "sha256:51a16d77e4aeeab83ad572f4e40ff192dd7d4c1568d677d8d45cbcc6c8a628f2",
+            "proposed_hash": "sha256:c5e6c12fd9a8a0d6979e67e6957793fe0e88b47de58d34aaf6916d11a329381c",
         }
     ]
     path = target_dir / "confirm_ledger_valid.yaml"
@@ -590,7 +590,7 @@ def confirm_ledger_no_rationale(target_dir: Path) -> Path:
             "concept_id": 500,
             "unit_in": "month",
             "confirmed_by": "a.reviewer",
-            "proposed_hash": "sha256:51a16d77e4aeeab83ad572f4e40ff192dd7d4c1568d677d8d45cbcc6c8a628f2",
+            "proposed_hash": "sha256:c5e6c12fd9a8a0d6979e67e6957793fe0e88b47de58d34aaf6916d11a329381c",
         }
     ]
     path = target_dir / "confirm_ledger_no_rationale.yaml"
@@ -616,7 +616,7 @@ def confirm_ledger_unmatched(target_dir: Path) -> Path:
             "unit_in": "month",
             "confirmed_by": "a.reviewer",
             "rationale": "this key does not exist in ledger.proposed.yaml",
-            "proposed_hash": "sha256:51a16d77e4aeeab83ad572f4e40ff192dd7d4c1568d677d8d45cbcc6c8a628f2",
+            "proposed_hash": "sha256:c5e6c12fd9a8a0d6979e67e6957793fe0e88b47de58d34aaf6916d11a329381c",
         }
     ]
     path = target_dir / "confirm_ledger_unmatched.yaml"
@@ -630,7 +630,7 @@ def confirm_ledger_unmatched(target_dir: Path) -> Path:
 # proposed_hash is the sha256 of THAT fixture pair's ledger.proposed.yaml
 # under default params (verified directly, same method as
 # confirm_ledger_valid()'s own docstring).
-_RULES_FIXTURE_HASH = "sha256:c91cd17efe84820fc4d124d7a2e67ec4c83aefd923018a47d8d780ae41ab0ae2"
+_RULES_FIXTURE_HASH = "sha256:41149e226537c6915e37d22699b710abece2d209917a383c34748378113706b0"
 
 _RULES_FIXTURE_SEX_ROW = {
     "cohort_id": "COHORT_PROPOSE",

@@ -152,7 +152,16 @@ print(json.dumps([dict(zip(cols, r)) for r in rows]))
             // candidate, contains no timestamp/hostname/path/run id, and is
             // byte-identical to a plot re-derived from the very rows just
             // read back (same inputs, same bytes).
-            def svgFile = new File("$outputDir/propose/confirmation_plots/COHORT_PROFILE_profile_test_OS_MONTHS_os_days.svg")
+            //
+            // I3 fix: the filename is the sanitised candidate_key PLUS an
+            // 8-hex-char sha256 digest of the full, un-sanitised
+            // candidate_key (bin/propose_channels.py's _sanitize_filename),
+            // so it is computed here the same way rather than hard-coded --
+            // this is what makes the mapping injective, not incidental.
+            def digest = java.security.MessageDigest.getInstance('SHA-256')
+                .digest(candidateKey.getBytes('UTF-8'))
+                .collect { String.format('%02x', it) }.join('').substring(0, 8)
+            def svgFile = new File("$outputDir/propose/confirmation_plots/COHORT_PROFILE_profile_test_OS_MONTHS_os_days-${digest}.svg")
             assert svgFile.exists()
             def svgText = svgFile.text
             assert svgText.startsWith('<svg')
@@ -308,6 +317,71 @@ print(json.dumps([dict(zip(cols, r)) for r in rows]))
             assert byChannel['name_similarity'].score != null
             assert byChannel['name_similarity'].status == 'scored'
             assert Math.abs(byChannel.values().findAll { it.score != null }.sum { it.effective_weight } - 1.0) < 1.0e-9
+        }
+    }
+
+    test("I3: _sanitize_filename is injective and deterministic, so two candidates that used to collapse to the same stem now get distinct, stable plot filenames") {
+        // Reuses the already-passing propose params purely to have a
+        // workflow.success pipeline run to attach this check to; the
+        // property under test is a pure function of bin/propose_channels.py
+        // and does not depend on this run's own candidates.
+        when {
+            params {
+                outdir          = "$outputDir"
+                stop_after      = "propose"
+                input           = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack    = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac = 0.5
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            // Two distinct candidate_keys that differ only in a character
+            // OUTSIDE [A-Za-z0-9_.-] (a space vs a slash) both collapsed to
+            // the identical "A_B_C_d" stem under the pre-fix
+            // `_UNSAFE_FILENAME_RE.sub("_", candidate_key)` -- exactly the
+            // Trap this fix closes.
+            def script = """
+import sys
+sys.path.insert(0, ${groovy.json.JsonOutput.toJson("$baseDir/bin")})
+from propose_channels import _sanitize_filename
+import json
+
+key_a = 'COHORT/A::dataset::COL A::var'
+key_b = 'COHORT A::dataset::COL/A::var'
+
+result = {
+    "stem_a": _sanitize_filename(key_a),
+    "stem_b": _sanitize_filename(key_b),
+    "stem_a_again": _sanitize_filename(key_a),
+}
+print(json.dumps(result))
+"""
+            def proc = ["python3", "-c", script].execute()
+            proc.waitFor()
+            if (proc.exitValue() != 0) {
+                throw new RuntimeException("_sanitize_filename probe failed: ${proc.err.text}")
+            }
+            def result = new groovy.json.JsonSlurper().parseText(proc.in.text)
+
+            // Injective: two distinct keys now get distinct filenames.
+            assert result.stem_a != result.stem_b
+
+            // Deterministic: the same key always yields the same filename
+            // (§10.1's invariant test and the ledger-hash contract both
+            // depend on this -- a nondeterministic filename would make the
+            // ledger differ between otherwise-identical runs).
+            assert result.stem_a == result.stem_a_again
+
+            // Still recognisably derived from the key (not just a bare
+            // hash) -- readable stem, plus an 8-hex-char digest suffix.
+            // (`==~` already requires a FULL-string match in Groovy, so no
+            // `^`/`$` anchors -- those would need dollar-escaping inside a
+            // slashy string, which is exactly what tripped this up before.)
+            assert result.stem_a ==~ /[A-Za-z0-9_.-]+-[0-9a-f]{8}/
+            assert result.stem_b ==~ /[A-Za-z0-9_.-]+-[0-9a-f]{8}/
         }
     }
 }
