@@ -69,11 +69,14 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
         params.permute_outcome_seed,
         params.invariant_n_permutations,
         params.invariant_scope,
+        params.max_candidates_per_column,
+        params.candidate_generators,
         params.outdir,
     )
     emit:
-    datasets = CLINICALHARMONIZE.out.datasets // channel: [ meta(cohort_id, dataset_id, role, holdout), path(table) ]
-    pack     = CLINICALHARMONIZE.out.pack     // channel: [ pack_hash, [variable, ...] ]
+    datasets   = CLINICALHARMONIZE.out.datasets   // channel: [ meta(cohort_id, dataset_id, role, holdout), path(table) ]
+    pack       = CLINICALHARMONIZE.out.pack       // channel: [ pack_hash, [variable, ...] ]
+    candidates = CLINICALHARMONIZE.out.candidates // channel: [ val(replicate), path(candidates.parquet) ]
 }
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

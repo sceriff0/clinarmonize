@@ -175,6 +175,26 @@
                     "help_text": "widening it is a design change, not a config tweak (\u00a710.1, ADR-003). \u00a78.3's standardized-difference forest legitimately reads outcome variables for REPORTING, so an end-to-end scope would fail honestly and then get relaxed. Only 'propose' is implemented.",
                     "fa_icon": "fas fa-crosshairs"
                 },
+                "max_candidates_per_column": {
+                    "type": "integer",
+                    "default": 20,
+                    "minimum": 1,
+                    "maximum": 500,
+                    "description": "The recall ceiling on distinct variables proposed per column.",
+                    "help_text": "The recall ceiling; excluded candidates are counted in the ledger (§4.1).",
+                    "fa_icon": "fas fa-filter"
+                },
+                "candidate_generators": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["name_ngram", "value_set", "unit"]
+                    },
+                    "default": ["name_ngram", "value_set", "unit"],
+                    "description": "Which cheap generators propose candidates at all.",
+                    "help_text": "Which cheap generators propose candidates at all (§4.1). A generator list without value_set silently loses institution-local columns (e.g. VAR_0114) whose only signal is their value set.",
+                    "fa_icon": "fas fa-magic"
+                },
                 "generality_terms": {
                     "type": "string",
                     "default": "assets/forbidden_terms.txt",

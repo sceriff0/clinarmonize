@@ -18,15 +18,27 @@ include { INVARIANT_REPORT } from '../modules/local/invariant_report/main'
 // needs its own, so the alias is what buys the second call site.
 //
 include { PROFILE_COLUMNS as PROFILE_COLUMNS_PERMUTED } from '../modules/local/profile_columns/main'
+include { PROPOSE_CANDIDATES } from '../modules/local/propose_candidates/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     THE NINE-STAGE GRAPH (§0.9)
 
-    Only 'ingest' (Phase 0, Task 2) and 'profile' (Phase 0, Task 3) are
-    implemented in this phase. A run that tries to reach any later stage
+    'ingest' (Phase 0, Task 2), 'profile' (Task 3) and 'propose' (Task 5a)
+    are implemented in this phase. A run that tries to reach any other stage
     fails with a clear message instead of silently succeeding as if that
     stage had run.
+
+    'link' (§3) is deliberately never built in phase 0 at all -- no task in
+    this phase's plan owns it -- while 'propose' (§4), which sits after it
+    in stageGraph()'s canonical order, is. implementedStages() is therefore
+    NOT a contiguous prefix of stageGraph() from Task 5a onward, which is
+    why the gate below checks the REQUESTED stage's own membership rather
+    than walking the graph for the first gap: 'propose' does not read
+    anything 'link' would have produced (it consumes per-dataset profiles
+    directly), so a stage-order contiguity check here would refuse
+    --stop_after propose over a gap nothing downstream of it needs, while
+    still correctly refusing --stop_after link itself.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 def stageGraph() {
@@ -34,23 +46,13 @@ def stageGraph() {
 }
 
 def implementedStages() {
-    return ['ingest', 'profile'] as Set
+    return ['ingest', 'profile', 'propose'] as Set
 }
 
 def requireStageImplemented(String stage) {
     if (!(stage in implementedStages())) {
-        error("Stage '${stage}' is not implemented in this phase (Phase 0, Task 3 implements 'ingest' and 'profile'). Re-run with --stop_after profile.")
+        error("Stage '${stage}' is not implemented in this phase (implemented: ${implementedStages().sort().join(', ')}). Re-run with --stop_after set to one of those.")
     }
-}
-
-//
-// The first stage in stageGraph() that implementedStages() does not cover,
-// or null if the whole graph is implemented. Used to decide, BEFORE any
-// process runs, whether --stop_after (or its default, the graph's last
-// stage) asks the run to reach further than this phase goes.
-//
-def firstUnimplementedStage(List graph) {
-    return graph.find { !(it in implementedStages()) }
 }
 
 /*
@@ -89,6 +91,24 @@ def computeParamsHash(String input, String concept_pack, boolean allow_single_da
         "allow_single_dataset=${allow_single_dataset}",
     ].join('\n')
     return sha256Hex(canonical.bytes)
+}
+
+//
+// §4.1 -- the pack's declared variable set and its pinned vocabulary
+// release (Ruling R14), read directly rather than through INGEST.out.pack:
+// that channel carries [pack_hash, pack.variables] only (§1.1's OUT slot,
+// an interface Task 5a was told is authoritative and not to redesign),
+// which does not carry the raw `vocabulary` key PROPOSE_CANDIDATES needs to
+// record. INGEST already validated the pack's structure once; this is a
+// second read of the same small YAML file, not a second source of truth
+// for it. There is no ATHENA release in this repo and no downloader pinned
+// by §0.8, so `vocabulary` is read and recorded (PROPOSE_CANDIDATES writes
+// it into versions.yml) -- never resolved.
+//
+def loadPackForPropose(String packPath) {
+    def packFile = file(resolvePackPath(packPath), checkIfExists: true)
+    def pack = new org.yaml.snakeyaml.Yaml().load(packFile.text)
+    return [pack.variables, pack.vocabulary]
 }
 
 //
@@ -224,6 +244,29 @@ def buildProfileParamsJson(
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    §4.1 — candidate generation
+
+    Contract (docs/steps/s4-1.md):
+      IN   profiles/*.json + the concept pack + the pinned ATHENA release
+      OUT  propose/candidates.parquet (cohort_id, dataset_id, column,
+                                        variable, concept_id, generator_id)
+      SIDE none; a column with zero candidates is emitted with a null concept_id
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+//
+// Serialises the recall-ceiling knobs PROPOSE_CANDIDATES needs into one
+// JSON blob, same reasoning as buildProfileParamsJson above.
+//
+def buildProposeParamsJson(Integer maxCandidatesPerColumn, List candidateGenerators) {
+    return groovy.json.JsonOutput.toJson([
+        max_candidates_per_column: maxCandidatesPerColumn,
+        candidate_generators     : candidateGenerators,
+    ])
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     §10.1 — the outcome-permutation harness
 
     Contract (docs/steps/s10-1.md):
@@ -334,6 +377,8 @@ workflow CLINICALHARMONIZE {
     permute_outcome_seed   // int|str: test-only seed or seed range for the §10.1 harness
     invariant_n_permutations // int:   permutations required before a run counts as a proof (§10.1)
     invariant_scope        // string:  stage the invariant claim is held over (§10.1, ADR-003)
+    max_candidates_per_column // int:  the recall ceiling on distinct variables proposed per column (§4.1)
+    candidate_generators    // list:   which cheap generators propose candidates at all (§4.1)
     outdir                 // string:  output directory
 
     main:
@@ -397,14 +442,16 @@ workflow CLINICALHARMONIZE {
     // The exemption is bound to the ONE stage the harness is declared to
     // hold its claim over -- invariant_scope -- and to nothing else. Any
     // other --stop_after keeps the gate, so `--permute_outcome_seed 1..100
-    // --stop_after emit` is still refused today, and once the proposer
-    // exists `--stop_after map` will still be refused rather than reporting
+    // --stop_after emit` is still refused today, and `--stop_after map`
+    // (§4/§5 exist; §6+ do not) is still refused rather than reporting
     // [SUCCESS] with 'map' never having run. The bypass covers exactly the
-    // measurement it was written for.
-    def firstMissingStage = firstUnimplementedStage(graph)
+    // measurement it was written for -- kept even though 'propose' itself
+    // is implemented as of Task 5a and so no longer NEEDS the bypass to
+    // pass this particular check; it stays live for when invariant_scope
+    // ever widens past 'propose'.
     def isInvariantScopeRun = isInvariantRun && targetStage == invariant_scope
-    if (!isInvariantScopeRun && firstMissingStage != null && graph.indexOf(targetStage) >= graph.indexOf(firstMissingStage)) {
-        requireStageImplemented(firstMissingStage)
+    if (!isInvariantScopeRun) {
+        requireStageImplemented(targetStage)
     }
     if (isInvariantRun && graph.indexOf(targetStage) < graph.indexOf('profile')) {
         error("--permute_outcome_seed needs a run that reaches at least 'profile'; --stop_after ${targetStage} stops before a permuted table is ever read, so the permutation could not affect anything.")
@@ -443,6 +490,14 @@ workflow CLINICALHARMONIZE {
         fail_sample_k,
     )
 
+    // §4.1 — the baseline half of the replicate-keyed profile channel
+    // PROPOSE_CANDIDATES consumes below. The baseline replicate is null
+    // (s4-1 brief); populated only when the profile stage actually runs, so
+    // a run that stops before 'profile' feeds PROPOSE_CANDIDATES nothing —
+    // matching that it also never reaches the 'propose' block that would
+    // consume it.
+    def ch_baseline_profiles_by_replicate = channel.empty()
+
     if (graph.indexOf(targetStage) >= graph.indexOf('profile')) {
         PROFILE_COLUMNS(ch_open, unitPatternsFile, profileParamsJson)
         ch_versions = ch_versions.mix(PROFILE_COLUMNS.out.versions)
@@ -458,6 +513,8 @@ workflow CLINICALHARMONIZE {
             max_failed_frac,
         )
         ch_versions = ch_versions.mix(MANIFEST_PROFILING_FAILURES.out.versions)
+
+        ch_baseline_profiles_by_replicate = PROFILE_COLUMNS.out.profile.map { meta, f -> [null, f] }
     }
 
     //
@@ -466,6 +523,12 @@ workflow CLINICALHARMONIZE {
     // results/profiles/ plus the --max_failed_frac gate stay about the data
     // the run was actually given.
     //
+    // §4.1 — the harness half of the replicate-keyed profile channel;
+    // populated only when the harness actually runs. meta.replicate is
+    // already the int seed PROFILE_COLUMNS_PERMUTED's caller attached
+    // below, so no re-parsing is needed here.
+    def ch_permuted_profiles_by_replicate = channel.empty()
+
     if (isInvariantRun) {
         PERMUTE_OUTCOME(ch_open, file(resolvePackPath(concept_pack)), seeds)
         ch_versions = ch_versions.mix(PERMUTE_OUTCOME.out.versions.first())
@@ -499,6 +562,8 @@ workflow CLINICALHARMONIZE {
         PROFILE_COLUMNS_PERMUTED(ch_permuted, unitPatternsFile, profileParamsJson)
         ch_versions = ch_versions.mix(PROFILE_COLUMNS_PERMUTED.out.versions.first())
 
+        ch_permuted_profiles_by_replicate = PROFILE_COLUMNS_PERMUTED.out.profile.map { meta, f -> [meta.replicate, f] }
+
         //
         // §4 does not exist yet, so no replicate produces a ledger and this
         // channel is empty by construction. That emptiness is this task's
@@ -525,10 +590,41 @@ workflow CLINICALHARMONIZE {
         ch_versions = ch_versions.mix(INVARIANT_REPORT.out.versions)
     }
 
+    //
+    // §4.1 — candidate generation. Consumes the baseline profiles (replicate
+    // null) AND, when the §10.1 harness is running, every permuted
+    // replicate's profiles too, through the SAME process — one task per
+    // REPLICATE (s4-1 brief: "Aggregate per REPLICATE, not per (dataset,
+    // replicate)"), grouping both channels above by their replicate key.
+    // With 100 seeded replicates plus the baseline that is 101 tasks, not
+    // 300 — every dataset's profile for one replicate is collected first.
+    //
+    def ch_candidates = channel.empty()
+
+    if (graph.indexOf(targetStage) >= graph.indexOf('propose')) {
+        def (packVariablesForPropose, vocabularyRelease) = loadPackForPropose(concept_pack)
+        def packVariablesJson = groovy.json.JsonOutput.toJson(packVariablesForPropose)
+        def proposeParamsJson = buildProposeParamsJson(max_candidates_per_column, candidate_generators)
+
+        def ch_profiles_by_replicate = ch_baseline_profiles_by_replicate
+            .mix(ch_permuted_profiles_by_replicate)
+            .groupTuple()
+
+        PROPOSE_CANDIDATES(
+            ch_profiles_by_replicate,
+            packVariablesJson,
+            vocabularyRelease,
+            proposeParamsJson,
+        )
+        ch_versions = ch_versions.mix(PROPOSE_CANDIDATES.out.versions)
+        ch_candidates = PROPOSE_CANDIDATES.out.candidates
+    }
+
     emit:
-    datasets = ch_open           // channel: [ meta(cohort_id, dataset_id, role, holdout), path(table) ]
-    pack     = INGEST.out.pack   // channel: [ pack_hash, [variable, ...] ]
-    versions = ch_versions       // channel: [ path(versions.yml) ]
+    datasets   = ch_open           // channel: [ meta(cohort_id, dataset_id, role, holdout), path(table) ]
+    pack       = INGEST.out.pack   // channel: [ pack_hash, [variable, ...] ]
+    candidates = ch_candidates     // channel: [ val(replicate), path(candidates.parquet) ] (§4.1; replicate is null for the baseline)
+    versions   = ch_versions       // channel: [ path(versions.yml) ]
 }
 
 /*

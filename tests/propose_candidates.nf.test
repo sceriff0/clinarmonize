@@ -1,0 +1,201 @@
+// §4.1 — generate candidate concepts from the pack's declared variable set.
+//
+// Fixtures: `-profile test` (applied automatically via nf-test.config) points
+// params.input at test_data/samplesheet.csv (Eunomia GiBleed) against the
+// default --concept_pack (assets/packs/minimal.yaml). The dedicated
+// generator/cap fixtures come from tests/fixtures/make_fixtures.py. Run
+// once before this test:
+//
+//   python3 tests/fixtures/fetch_eunomia.py
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/propose_candidates.nf.test --profile=+docker
+//
+// candidates.parquet has no native Groovy reader in this repo, so these
+// tests read it back through the same python3 + duckdb this pipeline's own
+// containers ship (R17: a scratch venv on PATH stands in for the digest-
+// pinned Wave image while Docker is unavailable). nf-test's `then` block
+// runs in a context that does not see top-level script defs, so this is a
+// closure re-declared inline in each test rather than a shared method.
+
+nextflow_pipeline {
+
+    name "Generate candidate concepts from the pack's declared variable set"
+    script "../main.nf"
+    tag "pipeline"
+    tag "propose"
+
+    test("no outcome-flagged variable in the pack ever receives a candidate (§4.1 done-when)") {
+
+        when {
+            params {
+                outdir     = "$outputDir"
+                stop_after = "propose"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def readParquetRows = { String path ->
+                def script = """
+import duckdb, json
+con = duckdb.connect()
+rows = con.execute("select * from read_parquet('${path}')").fetchall()
+cols = [d[0] for d in con.description]
+print(json.dumps([dict(zip(cols, r)) for r in rows]))
+"""
+                def proc = ["python3", "-c", script].execute()
+                proc.waitFor()
+                if (proc.exitValue() != 0) {
+                    throw new RuntimeException("failed to read parquet '${path}': ${proc.err.text}")
+                }
+                return new groovy.json.JsonSlurper().parseText(proc.in.text)
+            }
+
+            def candidatesFile = new File("$outputDir/propose/candidates.parquet")
+            assert candidatesFile.exists()
+
+            def rows = readParquetRows(candidatesFile.absolutePath)
+            assert rows.size() > 0
+
+            // The card's own OUT columns, verbatim.
+            assert (rows[0].keySet() as Set) == (['cohort_id', 'dataset_id', 'column', 'variable', 'concept_id', 'generator_id'] as Set)
+
+            // Dynamically read "the pack's outcome variables" the same way
+            // the card's done-when's SQL subquery does -- never a
+            // hard-coded column name (§0 the invariant).
+            def pack = new org.yaml.snakeyaml.Yaml().load(new File("$baseDir/assets/packs/minimal.yaml").text)
+            def outcomeNames = pack.variables.findAll { it.outcome == true }*.name as Set
+            assert outcomeNames.size() > 0
+
+            def outcomeCandidates = rows.findAll { it.variable in outcomeNames }
+            assert outcomeCandidates == []
+
+            // §4.1 SIDE: every profiled column is accounted for -- either
+            // by >=1 candidate row or by exactly one null-concept_id
+            // placeholder row.
+            def personProfile = new groovy.json.JsonSlurper()
+                .parse(new File("$outputDir/profiles/COHORT_GIBLEED.person.json")) as List
+            def personColumns = personProfile*.column as Set
+            def rowsForPerson = rows.findAll { it.cohort_id == 'COHORT_GIBLEED' && it.dataset_id == 'person' }
+            assert (rowsForPerson*.column as Set) == personColumns
+        }
+    }
+
+    test("the three cheap generators fire, the outcome nogo holds even under a maximal name match, and a matchless column gets a null placeholder") {
+
+        when {
+            params {
+                outdir       = "$outputDir"
+                stop_after   = "propose"
+                input        = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack = "$baseDir/test_data/fixtures/propose_pack.yaml"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def readParquetRows = { String path ->
+                def script = """
+import duckdb, json
+con = duckdb.connect()
+rows = con.execute("select * from read_parquet('${path}')").fetchall()
+cols = [d[0] for d in con.description]
+print(json.dumps([dict(zip(cols, r)) for r in rows]))
+"""
+                def proc = ["python3", "-c", script].execute()
+                proc.waitFor()
+                if (proc.exitValue() != 0) {
+                    throw new RuntimeException("failed to read parquet '${path}': ${proc.err.text}")
+                }
+                return new groovy.json.JsonSlurper().parseText(proc.in.text)
+            }
+
+            def rows = readParquetRows(new File("$outputDir/propose/candidates.parquet").absolutePath)
+            assert rows.size() > 0
+
+            // value_set: SEX_CODE's observed values ARE propose_pack()'s
+            // sex.domain_values.
+            def sexRows = rows.findAll { it.column == 'SEX_CODE' && it.variable == 'sex' }
+            assert sexRows.size() > 0
+            assert sexRows.every { it.concept_id == 100 }
+
+            // unit: WEIGHT_KG's header lifts a "kg" candidate unit that
+            // matches weight's declared unit.
+            def weightUnitRows = rows.findAll { it.column == 'WEIGHT_KG' && it.variable == 'weight' && it.generator_id == 'unit' }
+            assert weightUnitRows.size() == 1
+
+            // §4.1 nogo: STUDY_OUTCOME shares study_outcome's exact name
+            // (a guaranteed name_ngram hit) and a plausible day-like range,
+            // yet study_outcome is outcome-flagged, so this column must get
+            // ZERO candidates -- exactly one null-concept_id placeholder row.
+            def outcomeColRows = rows.findAll { it.column == 'STUDY_OUTCOME' }
+            assert outcomeColRows.size() == 1
+            assert outcomeColRows[0].variable == null
+            assert outcomeColRows[0].concept_id == null
+            assert outcomeColRows[0].generator_id == null
+
+            // SIDE: a column matching nothing gets exactly one
+            // null-concept_id placeholder row, not zero rows.
+            def noiseRows = rows.findAll { it.column == 'UNRELATED_NOISE_COLUMN' }
+            assert noiseRows.size() == 1
+            assert noiseRows[0].variable == null
+            assert noiseRows[0].concept_id == null
+            assert noiseRows[0].generator_id == null
+
+            // Every one of the four columns is represented.
+            assert (rows*.column as Set) == (['SEX_CODE', 'WEIGHT_KG', 'STUDY_OUTCOME', 'UNRELATED_NOISE_COLUMN'] as Set)
+        }
+    }
+
+    test("max_candidates_per_column bounds DISTINCT variables, deterministically, not generator hits") {
+
+        when {
+            params {
+                outdir                    = "$outputDir"
+                stop_after                = "propose"
+                input                     = "$baseDir/test_data/fixtures/propose_cap_samplesheet.csv"
+                concept_pack              = "$baseDir/test_data/fixtures/propose_cap_pack.yaml"
+                max_candidates_per_column = 5
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def readParquetRows = { String path ->
+                def script = """
+import duckdb, json
+con = duckdb.connect()
+rows = con.execute("select * from read_parquet('${path}')").fetchall()
+cols = [d[0] for d in con.description]
+print(json.dumps([dict(zip(cols, r)) for r in rows]))
+"""
+                def proc = ["python3", "-c", script].execute()
+                proc.waitFor()
+                if (proc.exitValue() != 0) {
+                    throw new RuntimeException("failed to read parquet '${path}': ${proc.err.text}")
+                }
+                return new groovy.json.JsonSlurper().parseText(proc.in.text)
+            }
+
+            def rows = readParquetRows(new File("$outputDir/propose/candidates.parquet").absolutePath)
+
+            // All 25 non-outcome variables name_ngram-match TARGET_VARIABLE;
+            // the recall ceiling must still cap it at 5 DISTINCT variables.
+            def targetRows = rows.findAll { it.column == 'TARGET_VARIABLE' }
+            def distinctVariables = (targetRows*.variable as Set)
+            assert distinctVariables.size() == 5
+
+            // The cap's tie-break is a fixed alphabetical order (a bound,
+            // not a score -- §4.1 nogo forbids ranking here), so the kept
+            // set is deterministic and reproducible run to run.
+            assert distinctVariables == (['target_variable_00', 'target_variable_01', 'target_variable_02', 'target_variable_03', 'target_variable_04'] as Set)
+
+            // The outcome variable is still never a candidate, even in a
+            // fixture built entirely to stress the recall ceiling.
+            assert rows.find { it.variable == 'cap_outcome' } == null
+        }
+    }
+}

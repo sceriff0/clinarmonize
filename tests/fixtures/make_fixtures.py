@@ -20,6 +20,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 HOLDOUT_TIMESTAMP = "2026-08-13T00:00:00Z"
 
@@ -362,6 +364,161 @@ def no_outcome_samplesheet(target_dir: Path) -> Path:
     return path
 
 
+def propose_pack(target_dir: Path) -> Path:
+    """§4.1's own small, generic concept pack (Ruling R2/Task 5 note: T5
+    "owns validating and extending" the pack format -- this is a dedicated
+    TEST pack, not an edit to assets/packs/minimal.yaml, so Task 5a's own
+    fixtures never touch a pack other tasks' green tests already depend on.
+
+    Three variables, one per generator this card's default
+    candidate_generators list names, plus the mandatory outcome flag:
+      sex            -- nominal, domain_values -- exercises value_set.
+      weight         -- continuous, unit: kg -- exercises unit (and, via
+                        a header like WEIGHT_KG, name_ngram too).
+      study_outcome  -- outcome: true -- the §4.1 nogo's own test subject:
+                        a column can share this variable's exact name AND
+                        a day-like value range and must still get ZERO
+                        candidates.
+    """
+    pack = {
+        "pack": "propose-fixture-generic",
+        "version": "0.1.0",
+        "vocabulary": "test-vocab-2026",
+        "variables": [
+            {
+                "name": "sex",
+                "domain": "person",
+                "concept_id": 100,
+                "type": "nominal",
+                "domain_values": ["male", "female", "other", "unknown"],
+            },
+            {
+                "name": "weight",
+                "domain": "measurement",
+                "concept_id": 200,
+                "type": "continuous",
+                "unit": "kg",
+            },
+            {
+                "name": "study_outcome",
+                "domain": "derived",
+                "derivation": "survival_time",
+                "unit": "day",
+                "outcome": True,
+            },
+        ],
+    }
+    path = target_dir / "propose_pack.yaml"
+    path.write_text(yaml.safe_dump(pack, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def propose_fixture_table(target_dir: Path) -> Path:
+    """A table whose four columns each exercise one §4.1 behaviour against
+    propose_pack():
+      SEX_CODE                -- values are EXACTLY propose_pack()'s `sex`
+                                  domain_values -- value_set's own test.
+      WEIGHT_KG                -- a header the unit patterns read as kg,
+                                  matching `weight`'s declared unit.
+      STUDY_OUTCOME             -- header IDENTICAL to the outcome-flagged
+                                  variable's name, with a plausible day-like
+                                  range -- must still get zero candidates
+                                  (§4.1 nogo).
+      UNRELATED_NOISE_COLUMN   -- matches nothing -- the SIDE clause's own
+                                  test: a null-concept_id placeholder row.
+    """
+    n = 12
+    sexes = ["male", "female", "other", "unknown"]
+    header = ["SEX_CODE", "WEIGHT_KG", "STUDY_OUTCOME", "UNRELATED_NOISE_COLUMN"]
+    rows = [header]
+    for i in range(n):
+        rows.append(
+            [
+                sexes[i % len(sexes)],
+                str(50 + i),
+                str(round(5.0 + i * 2.5, 1)),
+                f"noise_{i}",
+            ]
+        )
+    path = target_dir / "tables" / "propose_fixture.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(",".join(r) for r in rows) + "\n")
+    return path
+
+
+def propose_samplesheet(target_dir: Path) -> Path:
+    """Points --input at propose_fixture_table(); pair with --concept_pack
+    propose_pack()."""
+    table = propose_fixture_table(target_dir)
+    rows = [
+        "cohort_id,dataset_id,role,path,holdout",
+        f"COHORT_PROPOSE,propose_test,clinical,{table},false",
+    ]
+    path = target_dir / "propose_samplesheet.csv"
+    path.write_text("\n".join(rows) + "\n")
+    return path
+
+
+def propose_cap_pack(target_dir: Path) -> Path:
+    """25 variables that all name_ngram-match one column (target_variable_00
+    .. target_variable_24, all sharing the "target_variable" prefix a
+    TARGET_VARIABLE column trigram-overlaps heavily with), for
+    --max_candidates_per_column's own test: the recall ceiling has to bound
+    DISTINCT variables, not just cap generator hits."""
+    variables = [
+        {
+            "name": f"target_variable_{i:02d}",
+            "domain": "observation",
+            "concept_id": 400 + i,
+            "type": "nominal",
+            "domain_values": ["x"],
+        }
+        for i in range(25)
+    ]
+    variables.append(
+        {
+            "name": "cap_outcome",
+            "domain": "derived",
+            "derivation": "survival_time",
+            "unit": "day",
+            "outcome": True,
+        }
+    )
+    pack = {
+        "pack": "propose-cap-fixture",
+        "version": "0.1.0",
+        "vocabulary": "test-vocab-2026",
+        "variables": variables,
+    }
+    path = target_dir / "propose_cap_pack.yaml"
+    path.write_text(yaml.safe_dump(pack, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def propose_cap_table(target_dir: Path) -> Path:
+    header = ["TARGET_VARIABLE", "FILLER_COLUMN"]
+    rows = [header]
+    for i in range(10):
+        rows.append([str(i), str(i)])
+    path = target_dir / "tables" / "propose_cap_fixture.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(",".join(r) for r in rows) + "\n")
+    return path
+
+
+def propose_cap_samplesheet(target_dir: Path) -> Path:
+    """Points --input at propose_cap_table(); pair with --concept_pack
+    propose_cap_pack() and a small --max_candidates_per_column."""
+    table = propose_cap_table(target_dir)
+    rows = [
+        "cohort_id,dataset_id,role,path,holdout",
+        f"COHORT_PROPOSE_CAP,cap_test,clinical,{table},false",
+    ]
+    path = target_dir / "propose_cap_samplesheet.csv"
+    path.write_text("\n".join(rows) + "\n")
+    return path
+
+
 FIXTURES = [
     valid_samplesheet,
     duplicate_samplesheet,
@@ -374,6 +531,10 @@ FIXTURES = [
     encoding_samplesheet,
     invariant_samplesheet,
     no_outcome_samplesheet,
+    propose_pack,
+    propose_samplesheet,
+    propose_cap_pack,
+    propose_cap_samplesheet,
 ]
 
 
