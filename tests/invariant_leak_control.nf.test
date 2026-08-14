@@ -9,57 +9,107 @@
 // specificity. Without this, "the gate is on" was argued from code reading,
 // never observed.
 //
-// Mechanism (temporary sabotage, applied and reverted by THIS test's own
-// setup{}/cleanup{} -- never touches a normal run):
-//   setup{} reads bin/propose_channels.py, inserts a block that monkeypatches
-//   EvidenceChannel_score so every channel's score is perturbed by a hash of
-//   the PROFILE belonging to whichever column's name matches an
-//   outcome-flagged pack variable (the same normalisation
-//   score_name_similarity already uses) -- i.e. the outcome column's own
-//   profile bytes, in ROW ORDER, which PERMUTE_OUTCOME shuffles per seed.
-//   That is "wiring the outcome into a channel", built the same way §4.2's
-//   own channels are: a pure function of a ColumnProfile.
-//   cleanup{} restores the original file byte-for-byte. nf-test's
-//   TestExecutionEngine calls ITest.cleanup() in a try/finally around
-//   execute() (verified against the nf-test 0.9.5 jar's bytecode before
-//   relying on it), so the restore runs even if an assertion below fails.
+// Mechanism, fix round 2 (a real source file was never a safe place to do
+// this -- see below): setup{} copies the small subset of the real project a
+// plain `nextflow run` needs (main.nf, nextflow.config, nextflow_schema.json,
+// conf/, modules/, subworkflows/, workflows/, bin/, assets/ -- never tests/,
+// test_data/, .git, or any nf-test scaffolding) into a scratch directory
+// (.leak_control_copy/, gitignored), sabotages ONLY the COPY's
+// bin/propose_channels.py (monkeypatches EvidenceChannel_score so every
+// channel's score is REPLACED by a hash of the profile belonging to
+// whichever column's name matches an outcome-flagged pack variable -- the
+// outcome column's own profile bytes, in ROW ORDER, which PERMUTE_OUTCOME
+// shuffles per seed), and points this ONE test's `script` at the copy's
+// main.nf instead of the real one. cleanup{} deletes the whole scratch
+// directory.
 //
-// This is a genuinely temporary, test-local mutation of a real source file
-// on disk -- unusual for this repo. It is the only way to prove the harness
-// catches a REAL leak through the REAL pipeline (INVARIANT_REPORT, the
-// hashing, the stage gate) rather than a mocked one. A production "leak
-// mode" toggle was deliberately NOT added: nothing in bin/, modules/,
-// workflows/ or the schema changes; --enabled_channels' enum is untouched;
-// a real `nextflow run .` can never reach this code path because the code
-// does not exist except for the few seconds this one test's process runs.
+// The real checkout (bin/propose_channels.py included) is NEVER opened for
+// writing by this test, at any point, under any outcome. Fix round 1's
+// construction (sabotage bin/propose_channels.py in place, restore it in
+// cleanup{}) was reviewed and found to have four live hazards -- a setup{}
+// exception before the original text was captured would leave cleanup{}
+// truncating the file to zero bytes; the restore round-tripped through
+// file.text, which is charset-mediated and the file carries 22 non-ASCII
+// '§' lines; the restore was never verified byte-for-byte; and a SIGKILL
+// mid-test left no recovery path. None of those hazards can occur here,
+// because there is nothing tracked left in a half-written state: the ONLY
+// thing ever written to is a gitignored scratch copy, deleted (or, on a
+// crash, simply overwritten by copyRoot.deleteDir() at the TOP of the next
+// setup{}) after use, and the real bin/propose_channels.py is opened
+// read-only exactly once, to seed the copy.
+//
+// A production "leak mode" toggle was deliberately NOT added: nothing in
+// the real bin/, modules/, workflows/ or the schema ever changes; a plain
+// `nextflow run .` always uses the real, unmodified pipeline -- the
+// sabotaged code exists only inside a directory this one test creates and
+// destroys.
 
 nextflow_pipeline {
 
     name "The outcome-permutation harness's negative control"
-    script "../main.nf"
+    // A STATIC relative path, resolved by nf-test/Nextflow exactly like
+    // "../main.nf" is everywhere else in this suite (relative to this test
+    // file's own directory) -- NOT computed at parse time, so no baseDir/
+    // projectDir lookup is needed here. setup{} (below) is responsible for
+    // making sure this path exists and carries the sabotaged copy before
+    // `when{}` ever triggers Nextflow.
+    script "../.leak_control_copy/main.nf"
     tag "pipeline"
     tag "invariant"
 
     test("deliberately wiring the outcome column's profile into every channel's score makes the harness report a leak, not a proof") {
 
-        def proposeChannelsFile
-        def originalProposeChannelsText
+        def copyRoot
 
         setup {
-            new File("${baseDir}/tests/invariant/report.json").delete()
+            copyRoot = new File("${baseDir}/.leak_control_copy")
+            // A stale copy from a killed prior run (fix round 2, hazard 4)
+            // is cleaned up here rather than trusted to cleanup{} below --
+            // belt and suspenders, and it costs nothing since this whole
+            // directory is gitignored and disposable either way. This also
+            // takes care of any stale tests/invariant/report.json INSIDE
+            // the copy (see the note on INVARIANT_REPORT's publishDir
+            // below) -- there is no separate file to delete up front.
+            if (copyRoot.exists()) {
+                copyRoot.deleteDir()
+            }
+            copyRoot.mkdirs()
 
-            proposeChannelsFile = new File("${baseDir}/bin/propose_channels.py")
-            originalProposeChannelsText = proposeChannelsFile.text
+            // A JVM-level safety net for the SIGKILL case cleanup{} cannot
+            // reach: even if this process is killed mid-test, the NEXT run's
+            // setup{} above still starts clean, and this hook gives the
+            // current run its own best-effort chance too. Harmless no-op
+            // once cleanup{} has already deleted copyRoot.
+            Runtime.getRuntime().addShutdownHook(new Thread({
+                if (copyRoot.exists()) {
+                    copyRoot.deleteDir()
+                }
+            }))
 
+            ['main.nf', 'nextflow.config', 'nextflow_schema.json', 'conf', 'modules', 'subworkflows', 'workflows', 'bin', 'assets'].each { name ->
+                def src = new File("${baseDir}/${name}")
+                def proc = ['cp', '-R', src.absolutePath, copyRoot.absolutePath].execute()
+                proc.waitFor()
+                if (proc.exitValue() != 0) {
+                    throw new RuntimeException("failed to copy '${name}' into the leak-control sandbox: ${proc.err.text}")
+                }
+            }
+
+            // Sabotage the COPY only. The real bin/propose_channels.py is
+            // read here (via the copy, itself just read from the real file
+            // one line above) and never opened for writing at any point in
+            // this test.
+            def proposeChannelsFile = new File(copyRoot, 'bin/propose_channels.py')
+            def originalText = proposeChannelsFile.text
             def marker = 'if __name__ == "__main__":'
-            assert originalProposeChannelsText.contains(marker) : 'bin/propose_channels.py no longer carries the expected anchor line -- update this test\'s insertion point.'
+            assert originalText.contains(marker) : 'bin/propose_channels.py no longer carries the expected anchor line -- update this test\'s insertion point.'
 
             def sabotage = '''
 # ============================================================================
 # TEST-ONLY NEGATIVE CONTROL -- tests/invariant_leak_control.nf.test
-# Injected by that test's own setup{}, removed by its cleanup{}. Never
-# present outside that one test's process lifetime; never reachable from a
-# normal `nextflow run .`.
+# Lives ONLY in the gitignored .leak_control_copy/ scratch tree this one
+# test creates and destroys. Never present in the real bin/, never
+# reachable from a normal `nextflow run .`.
 #
 # Monkeypatches EvidenceChannel_score so every channel's score becomes a
 # function of the outcome-flagged variable's own column profile (found by
@@ -110,9 +160,9 @@ def EvidenceChannel_score(channel_id, column_profile, variable, params):
         # score a real 1.0 before sabotage, so an additive perturbation
         # clamped to [0, 1] gets silently absorbed at the ceiling and every
         # replicate looks identical again -- a false negative discovered
-        # empirically (first attempt: n_distinct_hashes stayed 1). Replacing
-        # the score outright with a value drawn from the outcome profile's
-        # own hash cannot be absorbed this way.
+        # empirically (fix round 1's first attempt: n_distinct_hashes stayed
+        # 1). Replacing the score outright with a value drawn from the
+        # outcome profile's own hash cannot be absorbed this way.
         score = (_SABOTAGE_OUTCOME_HASH % 10000) / 10000.0
         detail = dict(detail)
         detail["_test_only_sabotage"] = "score replaced by a hash of the outcome column's own profile (negative control)"
@@ -123,7 +173,7 @@ def EvidenceChannel_score(channel_id, column_profile, variable, params):
 
 '''
 
-            proposeChannelsFile.text = originalProposeChannelsText.replace(marker, sabotage + marker)
+            proposeChannelsFile.text = originalText.replace(marker, sabotage + marker)
         }
 
         when {
@@ -152,8 +202,17 @@ def EvidenceChannel_score(channel_id, column_profile, variable, params):
             // not the leak this test is built to observe.
             assert workflow.success
 
+            // conf/modules.config pins INVARIANT_REPORT's publishDir to
+            // "${projectDir}/tests/invariant" -- deliberately outside
+            // params.outdir (see that file's own comment) -- and `projectDir`
+            // is the RUNNING script's own directory. Since this test's
+            // `script` points at the sandbox copy, `projectDir` for this one
+            // run is copyRoot, not the real repo; the report lands at
+            // copyRoot/tests/invariant/report.json, never touching the real
+            // repo's tests/invariant/ at all (which tests/invariant.nf.test,
+            // running against the real script, still owns exclusively).
             def report = new groovy.json.JsonSlurper()
-                .parse(new File("$baseDir/tests/invariant/report.json"))
+                .parse(new File(copyRoot, 'tests/invariant/report.json'))
 
             // The harness ran for real: every replicate covered, no
             // no-op/incomplete/marginal-moved confound that would make a
@@ -174,7 +233,9 @@ def EvidenceChannel_score(channel_id, column_profile, variable, params):
         }
 
         cleanup {
-            proposeChannelsFile.text = originalProposeChannelsText
+            if (copyRoot?.exists()) {
+                copyRoot.deleteDir()
+            }
         }
     }
 }
