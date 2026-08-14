@@ -7,6 +7,16 @@
 //                                    variable, concept_id, generator_id)
 //   SIDE none; a column with zero candidates is emitted with a null concept_id
 //
+// Fix round 1 (review of Task 5a): candidates.parquet carries two columns
+// beyond the card's literal OUT list -- excluded_candidates (count) and
+// excluded_variables (comma-joined names), repeated on every row a column
+// produces. The card's own Why says the recall ceiling "sets a recall
+// ceiling that no later scoring can lift -- so what it excludes must be
+// recorded", and §4.3's ledger contract has a per-column
+// `excluded_candidates` field; without carrying it here, Task 5c cannot
+// reconstruct it at any price (bin/propose_candidates.py's
+// _apply_recall_ceiling is where it is computed).
+//
 // Ruling R14 -- there is no ATHENA release in this repo. Candidates are
 // generated against the PACK's declared variables and their concept_ids
 // (bin/propose_candidates.py); the pinned release id is read from the

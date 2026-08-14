@@ -132,18 +132,28 @@ def CandidateGenerator_generate(column_profile: dict, variables: list[dict], ena
     return proposals
 
 
-def _apply_recall_ceiling(proposals: list[dict], max_candidates_per_column: int) -> list[dict]:
+def _apply_recall_ceiling(proposals: list[dict], max_candidates_per_column: int) -> tuple[list[dict], list[str]]:
     """§4.1 Params: max_candidates_per_column is the recall ceiling on
     DISTINCT variables proposed for one column -- not on the number of
     generator hits, which can legitimately exceed it when several
     generators agree on the same variable. Variables beyond the ceiling are
     dropped, in a fixed alphabetical order: a deterministic bound, not a
-    score (§4.1 nogo: "do not score or rank -- §4.2 owns that")."""
+    score (§4.1 nogo: "do not score or rank -- §4.2 owns that").
+
+    Fix round 1: the card's Why is explicit that the ceiling "sets a recall
+    ceiling that no later scoring can lift -- so what it excludes must be
+    recorded", and §4.3's ledger contract has a per-column
+    `excluded_candidates` field it can only populate from what this stage
+    preserves. Returns (kept_proposals, excluded_variable_names) instead of
+    silently dropping the tail, so the caller can carry the count (and the
+    names) into candidates.parquet rather than destroying them."""
     distinct_variables = sorted({p["variable"] for p in proposals})
     if len(distinct_variables) <= max_candidates_per_column:
-        return proposals
+        return proposals, []
     kept = set(distinct_variables[:max_candidates_per_column])
-    return [p for p in proposals if p["variable"] in kept]
+    excluded_variables = distinct_variables[max_candidates_per_column:]
+    kept_proposals = [p for p in proposals if p["variable"] in kept]
+    return kept_proposals, excluded_variables
 
 
 def _parse_cohort_dataset(profile_path: str) -> tuple[str, str]:
@@ -163,20 +173,31 @@ def _write_candidates_parquet(rows: list[dict], out_path: str) -> None:
     con.execute(
         """
         CREATE TABLE candidates (
-            cohort_id    VARCHAR,
-            dataset_id   VARCHAR,
-            "column"     VARCHAR,
-            variable     VARCHAR,
-            concept_id   BIGINT,
-            generator_id VARCHAR
+            cohort_id           VARCHAR,
+            dataset_id          VARCHAR,
+            "column"            VARCHAR,
+            variable            VARCHAR,
+            concept_id          BIGINT,
+            generator_id        VARCHAR,
+            excluded_candidates BIGINT,
+            excluded_variables  VARCHAR
         )
         """
     )
     if rows:
         con.executemany(
-            'INSERT INTO candidates VALUES (?, ?, ?, ?, ?, ?)',
+            'INSERT INTO candidates VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [
-                (r["cohort_id"], r["dataset_id"], r["column"], r["variable"], r["concept_id"], r["generator_id"])
+                (
+                    r["cohort_id"],
+                    r["dataset_id"],
+                    r["column"],
+                    r["variable"],
+                    r["concept_id"],
+                    r["generator_id"],
+                    r["excluded_candidates"],
+                    r["excluded_variables"],
+                )
                 for r in rows
             ],
         )
@@ -213,12 +234,22 @@ def main(argv: list[str] | None = None) -> int:
 
         for column_profile in profiles:
             proposals = CandidateGenerator_generate(column_profile, variables, enabled_generators)
-            proposals = _apply_recall_ceiling(proposals, max_candidates_per_column)
+            proposals, excluded_variables = _apply_recall_ceiling(proposals, max_candidates_per_column)
+            # Fix round 1: the exclusion count (and, since it costs little
+            # beyond the count the ledger requires, the excluded variable
+            # names themselves -- more useful to the human at the §5 gate
+            # than a bare integer) is carried on EVERY row this column
+            # produces, kept or placeholder, so Task 5c can read it straight
+            # off candidates.parquet without reconstructing anything.
+            excluded_count = len(excluded_variables)
+            excluded_variables_str = ",".join(excluded_variables) if excluded_variables else None
 
             if not proposals:
                 # §4.1 SIDE: a column with zero candidates is emitted with a
                 # null concept_id -- recorded, not silently dropped, so the
-                # recall ceiling's exclusions stay auditable.
+                # recall ceiling's exclusions stay auditable. (excluded_count
+                # is always 0 here: a column with kept candidates below the
+                # ceiling never has anything excluded.)
                 rows.append(
                     {
                         "cohort_id": cohort_id,
@@ -227,6 +258,8 @@ def main(argv: list[str] | None = None) -> int:
                         "variable": None,
                         "concept_id": None,
                         "generator_id": None,
+                        "excluded_candidates": excluded_count,
+                        "excluded_variables": excluded_variables_str,
                     }
                 )
             else:
@@ -239,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
                             "variable": p["variable"],
                             "concept_id": p["concept_id"],
                             "generator_id": p["generator_id"],
+                            "excluded_candidates": excluded_count,
+                            "excluded_variables": excluded_variables_str,
                         }
                     )
 
