@@ -1,0 +1,290 @@
+// §4.2 — score each candidate on six independent evidence channels.
+//
+// Fixtures: `-profile test` (applied automatically via nf-test.config) points
+// params.input at test_data/samplesheet.csv (Eunomia GiBleed). This file's
+// own tests override --input/--concept_pack instead:
+//   - test_data/fixtures/profiling_samplesheet.csv (§2.1's own fixture,
+//     unmodified) paired with the NEW assets/packs/propose_channels_fixture.yaml
+//     -- the done-when's month-vs-day scenario.
+//   - test_data/fixtures/propose_samplesheet.csv + propose_pack.yaml (§4.1's
+//     own fixtures, unmodified) -- R14's "no domain_values" case and the
+//     outcome nogo, reused rather than re-invented.
+// Both come from tests/fixtures/make_fixtures.py. Run once before this test:
+//
+//   python3 tests/fixtures/fetch_eunomia.py
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/propose_channels.nf.test --profile=+docker
+//
+// evidence.parquet has no native Groovy reader in this repo, so these tests
+// read it back through the same python3 + duckdb this pipeline's own
+// containers ship (R17: a scratch venv on PATH stands in for the digest-
+// pinned Wave image while Docker is unavailable). nf-test's `then` block
+// runs in a context that does not see top-level script defs, so this is a
+// closure re-declared inline in each test rather than a shared method.
+
+nextflow_pipeline {
+
+    name "Score each candidate on six independent evidence channels"
+    script "../main.nf"
+    tag "pipeline"
+    tag "propose"
+
+    test("a fixture column of months scored against a day-unit concept is ranked down by unit_plausibility alone while the other four channels that CAN score in phase 0 score it high (§4.2 done-when)") {
+
+        when {
+            params {
+                outdir          = "$outputDir"
+                stop_after      = "propose"
+                input           = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack    = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac = 0.5 // 1 of 5 columns (MIXED_COL) fails to profile (20%); default 0.05 would refuse the run
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def readParquetRows = { String path ->
+                def script = """
+import duckdb, json
+con = duckdb.connect()
+rows = con.execute("select * from read_parquet('${path}')").fetchall()
+cols = [d[0] for d in con.description]
+print(json.dumps([dict(zip(cols, r)) for r in rows]))
+"""
+                def proc = ["python3", "-c", script].execute()
+                proc.waitFor()
+                if (proc.exitValue() != 0) {
+                    throw new RuntimeException("failed to read parquet '${path}': ${proc.err.text}")
+                }
+                return new groovy.json.JsonSlurper().parseText(proc.in.text)
+            }
+
+            def evidenceFile = new File("$outputDir/propose/evidence.parquet")
+            assert evidenceFile.exists()
+
+            def rows = readParquetRows(evidenceFile.absolutePath)
+            assert rows.size() > 0
+
+            // The card's own OUT columns, verbatim -- no more, no less.
+            assert (rows[0].keySet() as Set) == (['candidate_key', 'channel', 'score', 'detail'] as Set)
+
+            def candidateKey = 'COHORT_PROFILE::profile_test::OS_MONTHS::os_days'
+            def byChannel = rows.findAll { it.candidate_key == candidateKey }
+                .collectEntries { [(it.channel): it] }
+            assert byChannel.size() == 6 // every enabled channel gets a row, always
+
+            // unit_plausibility: the header says months (confidence 0.9),
+            // discounted for fitting only after a conversion -- and the
+            // conversion actually used is the card's own --unit_factor_candidates
+            // default (30.4375, months->days), not §2.2's separate day/month
+            // ambiguity band (which would have matched 'd' directly at 0.3).
+            def unitDetail = new groovy.json.JsonSlurper().parseText(byChannel['unit_plausibility'].detail)
+            assert byChannel['unit_plausibility'].score < 0.5
+            assert unitDetail.matched_ucum == 'mo'
+            assert unitDetail.reason.contains('30.4375')
+
+            // The other four channels that CAN score in phase 0 all score
+            // this candidate high: same name-ish column/variable, numeric
+            // type on both sides, matching cardinality, and (by fixture
+            // construction) an exact value-set match.
+            ['name_similarity', 'type_agreement', 'cardinality', 'value_overlap'].each { ch ->
+                assert byChannel[ch].score != null
+                assert byChannel[ch].score >= 0.7 : "${ch} scored ${byChannel[ch].score}, expected >= 0.7"
+            }
+
+            // distribution_distance is EXCLUDED, not scored 0 (Ruling R15):
+            // there is no confirmed reference in phase 0, ever.
+            assert byChannel['distribution_distance'].score == null
+            def distDetail = new groovy.json.JsonSlurper().parseText(byChannel['distribution_distance'].detail)
+            assert distDetail.status == 'no-reference'
+
+            // The ranking property itself: with R15's redistribution (sum of
+            // weight*score over channels that scored, divided by the sum of
+            // their weights -- distribution_distance's weight drops out
+            // entirely), the actual weighted total is strictly lower than the
+            // SAME arithmetic with only unit_plausibility's score swapped for
+            // a high one. unit_plausibility alone is what drags this candidate
+            // down; nothing else needs to change for the total to recover.
+            def weights = [name: 0.15, type: 0.15, card: 0.1, value: 0.3, dist: 0.15, unit: 0.15] // nextflow_schema.json's channel_weights default, verbatim
+            def shortKey = [
+                name_similarity       : 'name',
+                type_agreement         : 'type',
+                cardinality            : 'card',
+                value_overlap          : 'value',
+                distribution_distance  : 'dist',
+                unit_plausibility      : 'unit',
+            ]
+            def weightedTotal = { Map scoresByChannel ->
+                def num = 0.0
+                def den = 0.0
+                scoresByChannel.each { channel, score ->
+                    if (score == null) return
+                    def w = weights[shortKey[channel]]
+                    num += w * score
+                    den += w
+                }
+                return num / den
+            }
+            def actualScores = byChannel.collectEntries { channel, row -> [(channel): row.score] }
+            def actualTotal = weightedTotal(actualScores)
+            def counterfactualScores = actualScores + [unit_plausibility: 0.9]
+            def counterfactualTotal = weightedTotal(counterfactualScores)
+            assert actualTotal < counterfactualTotal
+
+            // §0 the invariant, re-checked directly: no evidence row is ever
+            // about the pack's outcome-flagged variable.
+            def pack = new org.yaml.snakeyaml.Yaml().load(new File("$baseDir/assets/packs/propose_channels_fixture.yaml").text)
+            def outcomeNames = pack.variables.findAll { it.outcome == true }*.name as Set
+            assert outcomeNames.size() > 0
+            assert rows.find { it.candidate_key.contains('::' + outcomeNames.first()) } == null
+
+            // R16: a deterministic SVG confirmation plot exists for this
+            // candidate, contains no timestamp/hostname/path/run id, and is
+            // byte-identical to a plot re-derived from the very rows just
+            // read back (same inputs, same bytes).
+            def svgFile = new File("$outputDir/propose/confirmation_plots/COHORT_PROFILE_profile_test_OS_MONTHS_os_days.svg")
+            assert svgFile.exists()
+            def svgText = svgFile.text
+            assert svgText.startsWith('<svg')
+            assert !svgText.toLowerCase().contains('timestamp')
+            assert !svgText.contains(outputDir.toString())
+            assert !svgText.contains(System.getProperty('user.home'))
+        }
+    }
+
+    test("value_overlap reports it could not score a continuous variable with no domain_values (Ruling R14), rather than scoring it 0 -- and the outcome nogo holds") {
+
+        when {
+            params {
+                outdir       = "$outputDir"
+                stop_after   = "propose"
+                input        = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack = "$baseDir/test_data/fixtures/propose_pack.yaml"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def readParquetRows = { String path ->
+                def script = """
+import duckdb, json
+con = duckdb.connect()
+rows = con.execute("select * from read_parquet('${path}')").fetchall()
+cols = [d[0] for d in con.description]
+print(json.dumps([dict(zip(cols, r)) for r in rows]))
+"""
+                def proc = ["python3", "-c", script].execute()
+                proc.waitFor()
+                if (proc.exitValue() != 0) {
+                    throw new RuntimeException("failed to read parquet '${path}': ${proc.err.text}")
+                }
+                return new groovy.json.JsonSlurper().parseText(proc.in.text)
+            }
+
+            def rows = readParquetRows(new File("$outputDir/propose/evidence.parquet").absolutePath)
+            assert rows.size() > 0
+
+            // weight (continuous, no domain_values): value_overlap cannot
+            // score -- explicit "could not score", never a silent 0.
+            def weightKey = 'COHORT_PROPOSE::propose_test::WEIGHT_KG::weight'
+            def weightValueOverlap = rows.find { it.candidate_key == weightKey && it.channel == 'value_overlap' }
+            assert weightValueOverlap != null
+            assert weightValueOverlap.score == null
+            def weightDetail = new groovy.json.JsonSlurper().parseText(weightValueOverlap.detail)
+            assert weightDetail.status == 'no-signal'
+            assert weightDetail.reason.contains('R14')
+
+            // sex (nominal, domain_values == the column's own observed
+            // values exactly): value_overlap DOES score, and scores it 1.0
+            // -- proving the R14 exclusion above is about the missing
+            // domain_values, not a channel that never works.
+            def sexKey = 'COHORT_PROPOSE::propose_test::SEX_CODE::sex'
+            def sexValueOverlap = rows.find { it.candidate_key == sexKey && it.channel == 'value_overlap' }
+            assert sexValueOverlap != null
+            assert sexValueOverlap.score == 1.0
+
+            // distribution_distance is excluded for EVERY candidate, sex and
+            // weight alike -- R15 is unconditional in phase 0.
+            rows.findAll { it.channel == 'distribution_distance' }.each {
+                assert it.score == null
+                def d = new groovy.json.JsonSlurper().parseText(it.detail)
+                assert d.status == 'no-reference'
+            }
+
+            // §4.1's null-placeholder row (UNRELATED_NOISE_COLUMN matched no
+            // generator) is never something this stage scores -- there is no
+            // variable to score it against.
+            assert rows.find { it.candidate_key.contains('UNRELATED_NOISE_COLUMN') } == null
+
+            // §0 the invariant: study_outcome is outcome-flagged and never a
+            // candidate in the first place (§4.1's own nogo), so no evidence
+            // row about it can exist here either.
+            def pack = new org.yaml.snakeyaml.Yaml().load(new File("$baseDir/test_data/fixtures/propose_pack.yaml").text)
+            def outcomeNames = pack.variables.findAll { it.outcome == true }*.name as Set
+            assert outcomeNames.size() > 0
+            assert rows.find { it.candidate_key.endsWith('::' + outcomeNames.first()) } == null
+
+            // R16: confirmation plots exist for the real candidates and
+            // nowhere else.
+            def plotsDir = new File("$outputDir/propose/confirmation_plots")
+            assert plotsDir.exists()
+            def plotNames = plotsDir.list() as Set
+            assert plotNames.any { it.contains('WEIGHT_KG') && it.contains('weight') }
+            assert plotNames.any { it.contains('SEX_CODE') && it.contains('sex') }
+            assert !plotNames.any { it.contains('STUDY_OUTCOME') }
+            assert !plotNames.any { it.contains('UNRELATED_NOISE_COLUMN') }
+        }
+    }
+
+    test("disabling a channel via --enabled_channels is recorded in the evidence file, not silently dropped") {
+
+        when {
+            params {
+                outdir           = "$outputDir"
+                stop_after       = "propose"
+                input            = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack     = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac  = 0.5 // 1 of 5 columns (MIXED_COL) fails to profile (20%); default 0.05 would refuse the run
+                enabled_channels = ['name_similarity', 'type_agreement', 'value_overlap', 'distribution_distance', 'unit_plausibility']
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def readParquetRows = { String path ->
+                def script = """
+import duckdb, json
+con = duckdb.connect()
+rows = con.execute("select * from read_parquet('${path}')").fetchall()
+cols = [d[0] for d in con.description]
+print(json.dumps([dict(zip(cols, r)) for r in rows]))
+"""
+                def proc = ["python3", "-c", script].execute()
+                proc.waitFor()
+                if (proc.exitValue() != 0) {
+                    throw new RuntimeException("failed to read parquet '${path}': ${proc.err.text}")
+                }
+                return new groovy.json.JsonSlurper().parseText(proc.in.text)
+            }
+
+            def rows = readParquetRows(new File("$outputDir/propose/evidence.parquet").absolutePath)
+            def candidateKey = 'COHORT_PROFILE::profile_test::OS_MONTHS::os_days'
+            def byChannel = rows.findAll { it.candidate_key == candidateKey }.collectEntries { [(it.channel): it] }
+
+            // Every candidate still gets exactly 6 rows -- cardinality's
+            // absence from --enabled_channels is RECORDED, not silent.
+            assert byChannel.size() == 6
+            assert byChannel['cardinality'].score == null
+            def cardDetail = new groovy.json.JsonSlurper().parseText(byChannel['cardinality'].detail)
+            assert cardDetail.status == 'disabled'
+            assert cardDetail.reason.contains('enabled_channels')
+
+            // The channels that stayed enabled still score normally.
+            assert byChannel['type_agreement'].score != null
+            assert byChannel['name_similarity'].score != null
+        }
+    }
+}

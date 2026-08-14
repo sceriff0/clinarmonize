@@ -19,6 +19,7 @@ include { INVARIANT_REPORT } from '../modules/local/invariant_report/main'
 //
 include { PROFILE_COLUMNS as PROFILE_COLUMNS_PERMUTED } from '../modules/local/profile_columns/main'
 include { PROPOSE_CANDIDATES } from '../modules/local/propose_candidates/main'
+include { PROPOSE_CHANNELS } from '../modules/local/propose_channels/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -267,6 +268,32 @@ def buildProposeParamsJson(Integer maxCandidatesPerColumn, List candidateGenerat
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    §4.2 — six independent evidence channels
+
+    Contract (docs/steps/s4-2.md):
+      IN   propose/candidates.parquet + profiles/*.json + pack + vocabulary
+      OUT  propose/evidence.parquet (candidate_key, channel, score, detail)
+           propose/confirmation_plots/<candidate_key>.svg (Ruling R16)
+      SIDE none — a pure function; this purity is what §10.1 tests
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+//
+// Serialises the six-channel knobs PROPOSE_CHANNELS needs into one JSON
+// blob, same reasoning as buildProfileParamsJson/buildProposeParamsJson
+// above.
+//
+def buildChannelParamsJson(Map channelWeights, List enabledChannels, List unitFactorCandidates, Boolean emitConfirmationPlots) {
+    return groovy.json.JsonOutput.toJson([
+        channel_weights        : channelWeights,
+        enabled_channels       : enabledChannels,
+        unit_factor_candidates : unitFactorCandidates,
+        emit_confirmation_plots: emitConfirmationPlots,
+    ])
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     §10.1 — the outcome-permutation harness
 
     Contract (docs/steps/s10-1.md):
@@ -379,6 +406,10 @@ workflow CLINICALHARMONIZE {
     invariant_scope        // string:  stage the invariant claim is held over (§10.1, ADR-003)
     max_candidates_per_column // int:  the recall ceiling on distinct variables proposed per column (§4.1)
     candidate_generators    // list:   which cheap generators propose candidates at all (§4.1)
+    channel_weights         // map:    per-channel weight in a candidate's combined score (§4.2)
+    enabled_channels        // list:   which of the six evidence channels score candidates at all (§4.2)
+    unit_factor_candidates  // list:   the conversions unit_plausibility will try (§4.2)
+    emit_confirmation_plots // boolean: emit the one plot that would kill each proposal (§4.2, Ruling R16: SVG)
     outdir                 // string:  output directory
 
     main:
@@ -600,6 +631,7 @@ workflow CLINICALHARMONIZE {
     // 300 — every dataset's profile for one replicate is collected first.
     //
     def ch_candidates = channel.empty()
+    def ch_evidence = channel.empty()
 
     if (graph.indexOf(targetStage) >= graph.indexOf('propose')) {
         def (packVariablesForPropose, vocabularyRelease) = loadPackForPropose(concept_pack)
@@ -618,12 +650,35 @@ workflow CLINICALHARMONIZE {
         )
         ch_versions = ch_versions.mix(PROPOSE_CANDIDATES.out.versions)
         ch_candidates = PROPOSE_CANDIDATES.out.candidates
+
+        //
+        // §4.2 — score each candidate on six independent evidence channels.
+        // Pairs each replicate's candidates.parquet with that SAME
+        // replicate's profiles: ch_profiles_by_replicate is the identical
+        // channel PROPOSE_CANDIDATES just consumed above, referenced again
+        // here rather than re-derived — DSL2 channels broadcast to every
+        // subscriber, so this does not "use it up". .join() keys the two
+        // on `replicate` (null for the baseline, the harness seed
+        // otherwise), giving PROPOSE_CHANNELS exactly one task per
+        // replicate, same as PROPOSE_CANDIDATES.
+        //
+        def channelParamsJson = buildChannelParamsJson(channel_weights, enabled_channels, unit_factor_candidates, emit_confirmation_plots)
+        def ch_candidates_with_profiles = PROPOSE_CANDIDATES.out.candidates.join(ch_profiles_by_replicate)
+
+        PROPOSE_CHANNELS(
+            ch_candidates_with_profiles,
+            packVariablesJson,
+            channelParamsJson,
+        )
+        ch_versions = ch_versions.mix(PROPOSE_CHANNELS.out.versions)
+        ch_evidence = PROPOSE_CHANNELS.out.evidence
     }
 
     emit:
     datasets   = ch_open           // channel: [ meta(cohort_id, dataset_id, role, holdout), path(table) ]
     pack       = INGEST.out.pack   // channel: [ pack_hash, [variable, ...] ]
     candidates = ch_candidates     // channel: [ val(replicate), path(candidates.parquet) ] (§4.1; replicate is null for the baseline)
+    evidence   = ch_evidence       // channel: [ val(replicate), path(evidence.parquet) ] (§4.2; replicate is null for the baseline)
     versions   = ch_versions       // channel: [ path(versions.yml) ]
 }
 

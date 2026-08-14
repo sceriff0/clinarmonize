@@ -195,6 +195,49 @@
                     "help_text": "Which cheap generators propose candidates at all (§4.1). A generator list without value_set silently loses institution-local columns (e.g. VAR_0114) whose only signal is their value set.",
                     "fa_icon": "fas fa-magic"
                 },
+                "channel_weights": {
+                    "type": "object",
+                    "default": { "name": 0.15, "type": 0.15, "card": 0.1, "value": 0.3, "dist": 0.15, "unit": 0.15 },
+                    "properties": {
+                        "name": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "type": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "card": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "value": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "dist": { "type": "number", "minimum": 0, "maximum": 1 },
+                        "unit": { "type": "number", "minimum": 0, "maximum": 1 }
+                    },
+                    "description": "Per-channel weight in a candidate's combined score; sums to 1.",
+                    "help_text": "The rank order of proposals; never their acceptance (§4.2). Keys are the six channels' short ids (name/type/card/value/dist/unit), one-to-one with name_similarity/type_agreement/cardinality/value_overlap/distribution_distance/unit_plausibility.",
+                    "fa_icon": "fas fa-balance-scale"
+                },
+                "enabled_channels": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["name_similarity", "type_agreement", "cardinality", "value_overlap", "distribution_distance", "unit_plausibility"]
+                    },
+                    "default": ["name_similarity", "type_agreement", "cardinality", "value_overlap", "distribution_distance", "unit_plausibility"],
+                    "description": "Which of the six evidence channels score candidates at all.",
+                    "help_text": "Disabling one is recorded in the ledger, not silent (§4.2): a disabled channel still gets a row per candidate, score null, detail explaining why.",
+                    "fa_icon": "fas fa-toggle-on"
+                },
+                "unit_factor_candidates": {
+                    "type": "array",
+                    "items": {
+                        "type": "number"
+                    },
+                    "default": [1, 30.4375, 365.25, 0.001, 1000],
+                    "description": "The conversions unit_plausibility will try.",
+                    "help_text": "The conversions unit_plausibility tries when a column's own candidate unit does not directly match a variable's declared unit (§4.2), e.g. months->days (30.4375) or years->days (365.25).",
+                    "fa_icon": "fas fa-exchange-alt"
+                },
+                "emit_confirmation_plots": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Emit the one plot that would kill each proposal.",
+                    "help_text": "SVG, not PNG, in this phase (Ruling R16: no plotting library is pinned and Docker was unavailable to build one in). One per candidate at propose/confirmation_plots/<candidate_key>.svg, deterministic and free of timestamps/hostnames/paths/run ids.",
+                    "fa_icon": "fas fa-chart-bar"
+                },
                 "generality_terms": {
                     "type": "string",
                     "default": "assets/forbidden_terms.txt",

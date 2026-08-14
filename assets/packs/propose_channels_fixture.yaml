@@ -1,0 +1,55 @@
+# assets/packs/propose_channels_fixture.yaml — a small, clinically generic
+# pack exercising §4.2's six evidence channels (tests/propose_channels.nf.test).
+#
+# Pairs with the EXISTING test_data/fixtures/tables/profiling_fixture.csv
+# (built by tests/fixtures/make_fixtures.py's profiling_fixture_table(), one
+# of §2.1/§2.2/§2.3's own fixtures): its OS_MONTHS column (0.0..60.0) already
+# resolves to a month candidate at header confidence and a day candidate at
+# low, range-derived confidence (§2.2's day/month ambiguity band). The
+# pack's own `time_to_event` (assets/packs/minimal.yaml) is outcome-flagged
+# and so can never receive a candidate (§0 the invariant) -- os_days below
+# is the NON-outcome day-unit variable §4.2's done-when needs to score
+# OS_MONTHS against.
+#
+# os_days' domain_values is deliberately the exact set of values
+# profiling_fixture.csv's OS_MONTHS column carries: this is a synthetic
+# fixture built to exercise value_overlap (Jaccard against a variable's
+# domain_values, Ruling R14) even for a continuous variable, not a claim
+# about what a real "days" concept's legal value set looks like. Every
+# value is a plain number; no disease term, gene symbol or cohort name
+# anywhere in this file (§10.3).
+pack: propose-channels-fixture-generic
+version: 0.1.0
+vocabulary: test-vocab-2026
+variables:
+  - name: os_days
+    domain: observation
+    concept_id: 500
+    type: continuous
+    unit: d
+    domain_values:
+      - "0.0"
+      - "3.2"
+      - "6.3"
+      - "9.5"
+      - "12.6"
+      - "15.8"
+      - "18.9"
+      - "22.1"
+      - "25.3"
+      - "28.4"
+      - "31.6"
+      - "34.7"
+      - "37.9"
+      - "41.1"
+      - "44.2"
+      - "47.4"
+      - "50.5"
+      - "53.7"
+      - "56.8"
+      - "60.0"
+  - name: study_endpoint
+    domain: derived
+    derivation: survival_time
+    unit: day
+    outcome: true # excluded from EVERY channel (§0 the invariant)
