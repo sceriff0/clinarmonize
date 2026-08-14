@@ -238,6 +238,24 @@
                     "help_text": "SVG, not PNG, in this phase (Ruling R16: no plotting library is pinned and Docker was unavailable to build one in). One per candidate at propose/confirmation_plots/<candidate_key>.svg, deterministic and free of timestamps/hostnames/paths/run ids.",
                     "fa_icon": "fas fa-chart-bar"
                 },
+                "ledger_top_k": {
+                    "type": "integer",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 50,
+                    "description": "Proposals written per column in the ledger.",
+                    "help_text": "Proposals written per column; the rest are counted (via excluded_candidates), not listed (§4.3).",
+                    "fa_icon": "fas fa-sort-amount-down"
+                },
+                "ledger_float_precision": {
+                    "type": "integer",
+                    "default": 4,
+                    "minimum": 2,
+                    "maximum": 8,
+                    "description": "Decimal places every ledger score/total is rounded to before serialisation.",
+                    "help_text": "Rounding, so a float's last bit cannot change the ledger's hash (§4.3, the card's own Trap).",
+                    "fa_icon": "fas fa-ruler-combined"
+                },
                 "generality_terms": {
                     "type": "string",
                     "default": "assets/forbidden_terms.txt",

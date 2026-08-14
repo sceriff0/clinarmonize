@@ -75,6 +75,8 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
         params.enabled_channels,
         params.unit_factor_candidates,
         params.emit_confirmation_plots,
+        params.ledger_top_k,
+        params.ledger_float_precision,
         params.outdir,
     )
     emit:
@@ -82,6 +84,7 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
     pack       = CLINICALHARMONIZE.out.pack       // channel: [ pack_hash, [variable, ...] ]
     candidates = CLINICALHARMONIZE.out.candidates // channel: [ val(replicate), path(candidates.parquet) ]
     evidence   = CLINICALHARMONIZE.out.evidence   // channel: [ val(replicate), path(evidence.parquet) ]
+    ledger     = CLINICALHARMONIZE.out.ledger     // channel: [ val(replicate), path(ledger.proposed.yaml) ]
 }
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

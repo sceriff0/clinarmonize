@@ -1,0 +1,221 @@
+// §4.3 — write the ranked, deterministic proposal ledger.
+//
+// Fixtures: reuses THREE existing fixture pairs rather than inventing new
+// ones (§0.2 "nothing more"):
+//   - test_data/fixtures/profiling_samplesheet.csv + assets/packs/propose_channels_fixture.yaml
+//     (§4.2's own done-when fixture: os_days vs OS_MONTHS) -- exercises a
+//     real weighted total, R15's dist:null exclusion, and the confirmation
+//     plot path.
+//   - test_data/fixtures/propose_samplesheet.csv + propose_pack.yaml (§4.1's
+//     own fixture: sex/weight/study_outcome) -- exercises --ledger_float_precision
+//     and the outcome nogo.
+//   - test_data/fixtures/propose_cap_samplesheet.csv + propose_cap_pack.yaml
+//     (§4.1's own recall-ceiling fixture: 25 variables matching one column)
+//     -- exercises --ledger_top_k truncation vs. the (unrelated)
+//     excluded_candidates recall-ceiling count.
+// Run once before this test:
+//
+//   python3 tests/fixtures/fetch_eunomia.py
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/propose_ledger.nf.test --profile=+docker
+//
+// ledger.proposed.yaml IS a Groovy-native format (unlike evidence.parquet /
+// candidates.parquet), so these tests read it back directly via
+// org.yaml.snakeyaml.Yaml rather than shelling out to python3+duckdb.
+
+nextflow_pipeline {
+
+    name "Write the ranked, deterministic proposal ledger"
+    script "../main.nf"
+    tag "pipeline"
+    tag "propose"
+
+    test("the ledger is built from evidence.parquet's weighted totals, sorted, rounded, R15-excluded, and lands at the literal results/ledger.proposed.yaml path (§4.3 done-when)") {
+
+        when {
+            params {
+                outdir          = "$outputDir"
+                stop_after      = "propose"
+                input           = "$baseDir/test_data/fixtures/profiling_samplesheet.csv"
+                concept_pack    = "$baseDir/assets/packs/propose_channels_fixture.yaml"
+                max_failed_frac = 0.5 // 1 of 5 columns (MIXED_COL) fails to profile (20%); default 0.05 would refuse the run
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            // R13: for a plain (non-range) run, the ledger lands at the
+            // LITERAL outdir-root path the card's I/O slot names -- no
+            // 'propose/' prefix, unlike candidates.parquet/evidence.parquet.
+            def ledgerFile = new File("$outputDir/ledger.proposed.yaml")
+            assert ledgerFile.exists()
+            assert !new File("$outputDir/propose/ledger.proposed.yaml").exists()
+
+            def ledger = new org.yaml.snakeyaml.Yaml().load(ledgerFile.text) as List
+            assert ledger.size() > 0
+
+            // Top-level entries sorted by (cohort_id, dataset_id, column).
+            def keys = ledger.collect { [it.cohort_id, it.dataset_id, it.column] }
+            assert keys == keys.sort(false) { a, b -> a[0] <=> b[0] ?: a[1] <=> b[1] ?: a[2] <=> b[2] }
+
+            def osMonthsEntry = ledger.find { it.cohort_id == 'COHORT_PROFILE' && it.dataset_id == 'profile_test' && it.column == 'OS_MONTHS' }
+            assert osMonthsEntry != null
+            assert (osMonthsEntry.keySet() as Set) == (['cohort_id', 'dataset_id', 'column', 'proposals'] as Set)
+            assert osMonthsEntry.proposals.size() == 1 // only os_days ever matches OS_MONTHS in this fixture
+
+            def proposal = osMonthsEntry.proposals[0]
+            assert (proposal.keySet() as Set) == (['variable', 'concept_id', 'total', 'evidence', 'confirmation_plot', 'excluded_candidates'] as Set)
+            assert proposal.variable == 'os_days'
+            assert proposal.concept_id == 500
+            assert proposal.excluded_candidates == 0 // nothing dropped by the recall ceiling for this column
+
+            // evidence carries the card's SHORT keys, resolved via
+            // bin/propose_channels.py's CHANNEL_WEIGHT_KEY -- never
+            // re-derived here.
+            assert (proposal.evidence.keySet() as Set) == (['name', 'type', 'card', 'value', 'dist', 'unit'] as Set)
+
+            // R15: distribution_distance is EXCLUDED in phase 0 -- null in
+            // the ledger, never a silent 0, and its weight is already
+            // redistributed into total (Ruling R23's effective_weight).
+            assert proposal.evidence.dist == null
+
+            // name/type/card/value/unit all scored (tests/propose_channels.nf.test
+            // already pins their exact values against this same fixture;
+            // here we only need "present, non-null, in [0,1]").
+            ['name', 'type', 'card', 'value', 'unit'].each { k ->
+                assert proposal.evidence[k] != null
+                assert proposal.evidence[k] >= 0.0 && proposal.evidence[k] <= 1.0
+            }
+
+            // total is a real weighted sum, not a bare average or a copy of
+            // one channel: strictly between the min and max of the five
+            // scored channels.
+            def scored = ['name', 'type', 'card', 'value', 'unit'].collect { proposal.evidence[it] }
+            assert proposal.total >= scored.min() && proposal.total <= scored.max()
+
+            // confirmation_plot points at the SAME sanitised-candidate-key
+            // SVG §4.2 (Ruling R16) actually wrote -- not a guessed path.
+            assert proposal.confirmation_plot == 'propose/confirmation_plots/COHORT_PROFILE_profile_test_OS_MONTHS_os_days.svg'
+            assert new File("$outputDir/${proposal.confirmation_plot}").exists()
+
+            // §0 the invariant: the pack's outcome variable never appears as
+            // a proposal anywhere in the ledger.
+            def pack = new org.yaml.snakeyaml.Yaml().load(new File("$baseDir/assets/packs/propose_channels_fixture.yaml").text)
+            def outcomeNames = pack.variables.findAll { it.outcome == true }*.name as Set
+            assert outcomeNames.size() > 0
+            assert ledger.every { entry -> entry.proposals.every { !(it.variable in outcomeNames) } }
+
+            // The card's nogo: no timestamp, hostname or absolute path
+            // anywhere in the file.
+            def text = ledgerFile.text
+            assert !text.toLowerCase().contains('timestamp')
+            assert !text.contains(outputDir.toString())
+            assert !text.contains(System.getProperty('user.home'))
+        }
+    }
+
+    test("ledger_top_k truncates listed proposals per column while excluded_candidates keeps reporting the (unrelated) recall ceiling") {
+
+        when {
+            params {
+                outdir        = "$outputDir"
+                stop_after    = "propose"
+                input         = "$baseDir/test_data/fixtures/propose_cap_samplesheet.csv"
+                concept_pack  = "$baseDir/test_data/fixtures/propose_cap_pack.yaml"
+                ledger_top_k  = 3
+                // max_candidates_per_column stays at its default (20): all
+                // 25 target_variable_NN candidates name_ngram-match
+                // TARGET_VARIABLE, the recall ceiling drops 5 of them
+                // (§4.1's own test), and THIS card's ledger_top_k further
+                // trims the kept 20 down to 3 listed proposals -- two
+                // independent truncations, deliberately exercised together
+                // so they cannot be confused for one another.
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def ledger = new org.yaml.snakeyaml.Yaml().load(new File("$outputDir/ledger.proposed.yaml").text) as List
+            def targetEntry = ledger.find { it.column == 'TARGET_VARIABLE' }
+            assert targetEntry != null
+            assert targetEntry.proposals.size() == 3 // ledger_top_k, not the 20 the recall ceiling kept
+
+            // Sorted by total, descending -- deterministically, not by
+            // whatever order DuckDB happened to return rows in.
+            def totals = targetEntry.proposals*.total
+            assert totals == totals.sort(false).reverse()
+
+            // excluded_candidates is candidates.parquet's OWN recall-ceiling
+            // count (25 - 20 = 5), carried straight through -- NOT
+            // recomputed from ledger_top_k's own (unrelated) truncation.
+            assert targetEntry.proposals.every { it.excluded_candidates == 5 }
+
+            // A column matching nothing (FILLER_COLUMN, §4.1's own
+            // null-placeholder row) never becomes a ledger entry at all --
+            // there is nothing to rank.
+            assert ledger.find { it.column == 'FILLER_COLUMN' } == null
+
+            // The outcome-flagged variable is never a proposal, even in a
+            // fixture built entirely to stress the recall ceiling.
+            assert ledger.every { entry -> entry.proposals.every { it.variable != 'cap_outcome' } }
+        }
+    }
+
+    test("ledger_float_precision rounds every float before it is serialised, and value_overlap's R14 exclusion stays null, not 0") {
+
+        when {
+            params {
+                outdir                  = "$outputDir"
+                stop_after              = "propose"
+                input                   = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack            = "$baseDir/test_data/fixtures/propose_pack.yaml"
+                ledger_float_precision  = 2
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def ledger = new org.yaml.snakeyaml.Yaml().load(new File("$outputDir/ledger.proposed.yaml").text) as List
+
+            // sex (nominal, domain_values == SEX_CODE's own observed set):
+            // value_overlap scores 1.0 -- present and rounded.
+            def sexEntry = ledger.find { it.column == 'SEX_CODE' }
+            assert sexEntry != null
+            assert sexEntry.proposals[0].variable == 'sex'
+            assert sexEntry.proposals[0].evidence.value == 1.0
+
+            // weight (continuous, no domain_values): value_overlap could not
+            // score -- null in the ledger too (R14), never a silent 0, and
+            // total is still a real weighted sum over the channels that DID
+            // score, not zero.
+            def weightEntry = ledger.find { it.column == 'WEIGHT_KG' }
+            assert weightEntry != null
+            assert weightEntry.proposals[0].variable == 'weight'
+            assert weightEntry.proposals[0].evidence.value == null
+            assert weightEntry.proposals[0].total != null
+            assert weightEntry.proposals[0].total > 0.0
+
+            // Every float in the file rounds to at most 2 decimal places --
+            // the Trap's guard, checked structurally rather than by
+            // trusting the writer's own rounding call.
+            def allFloats = []
+            ledger.each { entry ->
+                entry.proposals.each { p ->
+                    if (p.total != null) { allFloats << p.total }
+                    p.evidence.values().each { v -> if (v != null) { allFloats << v } }
+                }
+            }
+            assert allFloats.size() > 0
+            allFloats.each { v ->
+                def rounded = Math.round(v * 100) / 100.0
+                assert Math.abs(v - rounded) < 1.0e-9 : "${v} carries more than 2 decimal places"
+            }
+
+            // §0 the invariant: study_outcome never appears.
+            assert ledger.every { entry -> entry.proposals.every { it.variable != 'study_outcome' } }
+        }
+    }
+}

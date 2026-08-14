@@ -20,6 +20,7 @@ include { INVARIANT_REPORT } from '../modules/local/invariant_report/main'
 include { PROFILE_COLUMNS as PROFILE_COLUMNS_PERMUTED } from '../modules/local/profile_columns/main'
 include { PROPOSE_CANDIDATES } from '../modules/local/propose_candidates/main'
 include { PROPOSE_CHANNELS } from '../modules/local/propose_channels/main'
+include { PROPOSE_LEDGER } from '../modules/local/propose_ledger/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -294,6 +295,30 @@ def buildChannelParamsJson(Map channelWeights, List enabledChannels, List unitFa
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    §4.3 — the deterministic proposal ledger
+
+    Contract (docs/steps/s4-3.md):
+      IN   propose/evidence.parquet (+ propose/candidates.parquet, for
+           excluded_candidates -- Task 5b's own contract note)
+      OUT  ledger.proposed.yaml -- ordered, stable, hashable
+      SIDE none; identical inputs MUST yield an identical sha256
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+*/
+
+//
+// Serialises the ledger-writer's two knobs into one JSON blob, same
+// reasoning as buildProfileParamsJson/buildProposeParamsJson/
+// buildChannelParamsJson above.
+//
+def buildLedgerParamsJson(Integer ledgerTopK, Integer ledgerFloatPrecision) {
+    return groovy.json.JsonOutput.toJson([
+        ledger_top_k          : ledgerTopK,
+        ledger_float_precision: ledgerFloatPrecision,
+    ])
+}
+
+/*
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     §10.1 — the outcome-permutation harness
 
     Contract (docs/steps/s10-1.md):
@@ -410,6 +435,8 @@ workflow CLINICALHARMONIZE {
     enabled_channels        // list:   which of the six evidence channels score candidates at all (§4.2)
     unit_factor_candidates  // list:   the conversions unit_plausibility will try (§4.2)
     emit_confirmation_plots // boolean: emit the one plot that would kill each proposal (§4.2, Ruling R16: SVG)
+    ledger_top_k            // int:     proposals written per column; the rest are counted, not listed (§4.3)
+    ledger_float_precision  // int:     rounding, so a float's last bit cannot change the ledger's hash (§4.3)
     outdir                 // string:  output directory
 
     main:
@@ -560,9 +587,16 @@ workflow CLINICALHARMONIZE {
     // below, so no re-parsing is needed here.
     def ch_permuted_profiles_by_replicate = channel.empty()
 
+    // §10.1 -- INVARIANT_REPORT needs every replicate's permutation
+    // manifest, but it cannot be CALLED until ch_ledgers (below, §4.3) is
+    // known, and computing a ledger needs the permuted profiles this same
+    // block produces. Collected here, called on after the propose block.
+    def ch_permutation_manifests = channel.empty()
+
     if (isInvariantRun) {
         PERMUTE_OUTCOME(ch_open, file(resolvePackPath(concept_pack)), seeds)
         ch_versions = ch_versions.mix(PERMUTE_OUTCOME.out.versions.first())
+        ch_permutation_manifests = PERMUTE_OUTCOME.out.manifest
 
         //
         // Re-key one dataset's N permuted tables into N independent channel
@@ -594,31 +628,6 @@ workflow CLINICALHARMONIZE {
         ch_versions = ch_versions.mix(PROFILE_COLUMNS_PERMUTED.out.versions.first())
 
         ch_permuted_profiles_by_replicate = PROFILE_COLUMNS_PERMUTED.out.profile.map { meta, f -> [meta.replicate, f] }
-
-        //
-        // §4 does not exist yet, so no replicate produces a ledger and this
-        // channel is empty by construction. That emptiness is this task's
-        // deliverable: the harness runs end to end, hashes what it finds,
-        // finds nothing, and reports no-ledger. Task 5 replaces this one
-        // line with PROPOSE.out.ledger -- shaped [ val(replicate),
-        // path('ledger.proposed.yaml') ] -- and nothing else here changes.
-        //
-        def ch_ledgers = channel.empty()
-
-        INVARIANT_REPORT(
-            PERMUTE_OUTCOME.out.manifest.collect(),
-            // Hashed in Groovy rather than staged into the process: the
-            // ledgers all share one filename by contract, so staging 100 of
-            // them would force a rename that loses the only thing the
-            // report needs them keyed by -- which replicate produced which.
-            ch_ledgers.map { replicate, ledger -> "${replicate}=${sha256Hex(ledger.bytes)}" }.toSortedList(),
-            // The resolved seed list, not the raw spec: parseSeedSpec()
-            // above is the pipeline's only parser for `int or range`.
-            seeds,
-            invariant_n_permutations,
-            invariant_scope,
-        )
-        ch_versions = ch_versions.mix(INVARIANT_REPORT.out.versions)
     }
 
     //
@@ -632,6 +641,7 @@ workflow CLINICALHARMONIZE {
     //
     def ch_candidates = channel.empty()
     def ch_evidence = channel.empty()
+    def ch_ledgers = channel.empty()
 
     if (graph.indexOf(targetStage) >= graph.indexOf('propose')) {
         def (packVariablesForPropose, vocabularyRelease) = loadPackForPropose(concept_pack)
@@ -672,6 +682,56 @@ workflow CLINICALHARMONIZE {
         )
         ch_versions = ch_versions.mix(PROPOSE_CHANNELS.out.versions)
         ch_evidence = PROPOSE_CHANNELS.out.evidence
+
+        //
+        // §4.3 — the ranked, deterministic proposal ledger. Pairs each
+        // replicate's candidates.parquet with that SAME replicate's
+        // evidence.parquet via .join() on `replicate` (null for the
+        // baseline, the harness seed otherwise), giving PROPOSE_LEDGER
+        // exactly one task per replicate, same as PROPOSE_CANDIDATES /
+        // PROPOSE_CHANNELS. This is the channel that becomes §10.1's
+        // ch_ledgers below -- Task 4's placeholder `channel.empty()` line.
+        //
+        def ledgerParamsJson = buildLedgerParamsJson(ledger_top_k, ledger_float_precision)
+        def ch_candidates_with_evidence = ch_candidates.join(ch_evidence)
+
+        PROPOSE_LEDGER(
+            ch_candidates_with_evidence,
+            ledgerParamsJson,
+        )
+        ch_versions = ch_versions.mix(PROPOSE_LEDGER.out.versions)
+        ch_ledgers = PROPOSE_LEDGER.out.ledger
+    }
+
+    //
+    // §10.1 — now that ch_ledgers (§4.3, above) is known one way or the
+    // other (a real per-replicate channel once 'propose' has run, or still
+    // empty if --stop_after stopped short of it), report the harness's
+    // verdict. Moved to AFTER the propose block (unlike Task 4's original
+    // single combined `if (isInvariantRun)` block) because DSL2's Groovy
+    // script executes top-to-bottom to BUILD the dataflow graph: ch_ledgers
+    // has to be assigned its real value before this line references it, and
+    // computing a real ledger needs the propose block's own output.
+    // ch_permutation_manifests was collected in the earlier §10.1 block
+    // (still in its original position, since it does not depend on
+    // ch_ledgers) so nothing about PERMUTE_OUTCOME / PROFILE_COLUMNS_PERMUTED
+    // moved.
+    //
+    if (isInvariantRun) {
+        INVARIANT_REPORT(
+            ch_permutation_manifests.collect(),
+            // Hashed in Groovy rather than staged into the process: the
+            // ledgers all share one filename by contract, so staging 100 of
+            // them would force a rename that loses the only thing the
+            // report needs them keyed by -- which replicate produced which.
+            ch_ledgers.map { replicate, ledger -> "${replicate}=${sha256Hex(ledger.bytes)}" }.toSortedList(),
+            // The resolved seed list, not the raw spec: parseSeedSpec()
+            // above is the pipeline's only parser for `int or range`.
+            seeds,
+            invariant_n_permutations,
+            invariant_scope,
+        )
+        ch_versions = ch_versions.mix(INVARIANT_REPORT.out.versions)
     }
 
     emit:
@@ -679,6 +739,7 @@ workflow CLINICALHARMONIZE {
     pack       = INGEST.out.pack   // channel: [ pack_hash, [variable, ...] ]
     candidates = ch_candidates     // channel: [ val(replicate), path(candidates.parquet) ] (§4.1; replicate is null for the baseline)
     evidence   = ch_evidence       // channel: [ val(replicate), path(evidence.parquet) ] (§4.2; replicate is null for the baseline)
+    ledger     = ch_ledgers        // channel: [ val(replicate), path(ledger.proposed.yaml) ] (§4.3; replicate is null for the baseline)
     versions   = ch_versions       // channel: [ path(versions.yml) ]
 }
 
