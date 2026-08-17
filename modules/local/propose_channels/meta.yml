@@ -1,0 +1,74 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: propose_channels
+description: Score every candidate across the six independent evidence channels (section 4.2)
+keywords:
+  - scoring
+  - evidence
+  - channels
+tools:
+  - python:
+      description: Interpreter running this module's script from bin/.
+      homepage: https://www.python.org
+      documentation: https://docs.python.org/3/
+      licence:
+        - PSF-2.0
+      identifier: ""
+  - duckdb:
+      description: In-process analytical database. Used for Parquet I/O and to pin quantile interpolation
+        to a single engine so ledger hashes stay stable.
+      homepage: https://duckdb.org
+      documentation: https://duckdb.org/docs/
+      licence:
+        - MIT
+      identifier: ""
+input:
+  - - replicate:
+        type: string
+        description: Replicate identifier, e.g. 'observed' or a permutation seed
+    - candidates_parquet:
+        type: file
+        description: Candidates from PROPOSE_CANDIDATES
+        pattern: "*.parquet"
+        ontologies: []
+    - profile_jsons:
+        type: file
+        description: Per-column profiles for this replicate
+        pattern: "*.json"
+        ontologies: []
+  - - pack_variables_json:
+        type: string
+        description: JSON-encoded target variable definitions from the pack
+  - - channel_params_json:
+        type: string
+        description: JSON-encoded channel weights and enabled-channel set
+output:
+  evidence:
+    - - replicate:
+          type: string
+          description: Replicate identifier, e.g. 'observed' or a permutation seed
+      - "*.parquet":
+          type: file
+          description: One row per (candidate, channel) with score and effective weight
+          pattern: "*.parquet"
+          ontologies: []
+  confirmation_plots:
+    - - replicate:
+          type: string
+          description: Replicate identifier, e.g. 'observed' or a permutation seed
+      - plots:
+          type: directory
+          description: Per-candidate confirmation plots, when emit_confirmation_plots is set
+  versions:
+    - - ${task.process}:
+          type: string
+          description: The process the versions were collected from
+      - versions.yml:
+          type: file
+          description: File containing software versions
+          pattern: versions.yml
+          ontologies: []
+authors:
+  - "@bolt3x"
+maintainers:
+  - "@bolt3x"

@@ -21,7 +21,8 @@
 process INVARIANT_REPORT {
     label 'process_single'
 
-    container "wave.seqera.io/wt/211e562aa32e/wave/build:duckdb-1.5.5_pyyaml-6.0.2--d70265250861aaf1@sha256:af953fd9ecb445cb0e62ecb3ca0427c2abb805feb0e7f3e9fd41982e9e03c756"
+    conda "${moduleDir}/environment.yml"
+    container "docker.io/bolt3x/clinarmonize-duckdb:1.5.5_pyyaml6.0.2"
 
     input:
     path permutation_manifests, stageAs: 'permutations_in/*'

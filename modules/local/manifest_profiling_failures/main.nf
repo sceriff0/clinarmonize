@@ -15,11 +15,12 @@
 process MANIFEST_PROFILING_FAILURES {
     label 'process_single'
 
-    // Same Wave-built image as PROFILE_COLUMNS (fix round 1): this process
+    // Same image as PROFILE_COLUMNS (fix round 1): this process
     // only needs python3's stdlib (json/glob), but reusing one digest-pinned
     // image across the whole profiling stage means one less container to
     // pull and trust, rather than pinning a second, unrelated base image.
-    container "wave.seqera.io/wt/211e562aa32e/wave/build:duckdb-1.5.5_pyyaml-6.0.2--d70265250861aaf1@sha256:af953fd9ecb445cb0e62ecb3ca0427c2abb805feb0e7f3e9fd41982e9e03c756"
+    conda "${moduleDir}/environment.yml"
+    container "docker.io/bolt3x/clinarmonize-duckdb:1.5.5_pyyaml6.0.2"
 
     input:
     path profile_jsons, stageAs: 'profiles_in/*'

@@ -22,11 +22,12 @@ process CONFIRM_LEDGER {
     tag "confirm"
     label 'process_single'
 
-    // Same digest-pinned Wave image every other propose/confirm stage uses
+    // Same image every other propose/confirm stage uses
     // (python3, duckdb 1.5.5, pyyaml 6.0.2 baked in). duckdb is unused here
     // (this script only ever hashes bytes and parses two small YAML files)
     // -- reused anyway to keep the pipeline's trusted-image count at one.
-    container "wave.seqera.io/wt/211e562aa32e/wave/build:duckdb-1.5.5_pyyaml-6.0.2--d70265250861aaf1@sha256:af953fd9ecb445cb0e62ecb3ca0427c2abb805feb0e7f3e9fd41982e9e03c756"
+    conda "${moduleDir}/environment.yml"
+    container "docker.io/bolt3x/clinarmonize-duckdb:1.5.5_pyyaml6.0.2"
 
     input:
     path confirmed_ledger_file

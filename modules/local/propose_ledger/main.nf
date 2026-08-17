@@ -30,11 +30,12 @@ process PROPOSE_LEDGER {
     tag "replicate:${replicate ?: 'baseline'}"
     label 'process_single'
 
-    // Same digest-pinned Wave image PROFILE_COLUMNS / PROPOSE_CANDIDATES /
+    // Same image PROFILE_COLUMNS / PROPOSE_CANDIDATES /
     // PROPOSE_CHANNELS use (python3, duckdb 1.5.5, pyyaml 6.0.2 baked in) --
     // this process only needs python3 + duckdb + pyyaml, all three already
     // baked in, so reusing it keeps the pipeline's trusted-image count at one.
-    container "wave.seqera.io/wt/211e562aa32e/wave/build:duckdb-1.5.5_pyyaml-6.0.2--d70265250861aaf1@sha256:af953fd9ecb445cb0e62ecb3ca0427c2abb805feb0e7f3e9fd41982e9e03c756"
+    conda "${moduleDir}/environment.yml"
+    container "docker.io/bolt3x/clinarmonize-duckdb:1.5.5_pyyaml6.0.2"
 
     input:
     tuple val(replicate), path(candidates_parquet), path(evidence_parquet)

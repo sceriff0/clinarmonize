@@ -1,0 +1,48 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: compile_rules
+description: Compile confirmed decisions into an executable ruleset (section 5.2)
+keywords:
+  - rules
+  - compile
+  - harmonization
+tools:
+  - python:
+      description: Interpreter running this module's script from bin/.
+      homepage: https://www.python.org
+      documentation: https://docs.python.org/3/
+      licence:
+        - PSF-2.0
+      identifier: ""
+input:
+  - - decisions_json:
+        type: file
+        description: Confirmed decisions from CONFIRM_LEDGER
+        pattern: decisions.json
+        ontologies: []
+  - - compile_params_json:
+        type: string
+        description: JSON-encoded compiler parameters, including the collision policy
+  - - pack_version:
+        type: string
+        description: Pack version recorded in the ruleset for provenance
+output:
+  ruleset:
+    - - rules/ruleset.json:
+          type: file
+          description: The compiled ruleset. Colliding rules are never silently merged
+          pattern: rules/ruleset.json
+          ontologies: []
+  versions:
+    - - ${task.process}:
+          type: string
+          description: The process the versions were collected from
+      - versions.yml:
+          type: file
+          description: File containing software versions
+          pattern: versions.yml
+          ontologies: []
+authors:
+  - "@bolt3x"
+maintainers:
+  - "@bolt3x"

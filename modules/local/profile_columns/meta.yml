@@ -1,0 +1,77 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: profile_columns
+description: Profile every column of one staged table into a typed per-column JSON profile (section 2)
+keywords:
+  - profiling
+  - clinical
+  - omop
+  - columns
+tools:
+  - python:
+      description: Interpreter running this module's script from bin/.
+      homepage: https://www.python.org
+      documentation: https://docs.python.org/3/
+      licence:
+        - PSF-2.0
+      identifier: ""
+  - duckdb:
+      description: In-process analytical database. Used for Parquet I/O and to pin quantile interpolation
+        to a single engine so ledger hashes stay stable.
+      homepage: https://duckdb.org
+      documentation: https://duckdb.org/docs/
+      licence:
+        - MIT
+      identifier: ""
+input:
+  - - meta:
+        type: map
+        description: Groovy Map identifying the unit of work, e.g. [ cohort_id:'COHORT_A', dataset_id:'person'
+          ]
+    - table:
+        type: file
+        description: One staged cohort table to profile
+        pattern: "*.csv"
+        ontologies: []
+  - - unit_patterns:
+        type: file
+        description: Unit patterns matched against column headers (section 2.2)
+        pattern: "*.yaml"
+        ontologies: []
+  - - params_json:
+        type: string
+        description: JSON-encoded profiling parameters
+output:
+  profile:
+    - - meta:
+          type: map
+          description: Groovy Map identifying the unit of work, e.g. [ cohort_id:'COHORT_A', dataset_id:'person'
+            ]
+      - "*.json":
+          type: file
+          description: "One record per column: inferred type, cardinality, quantiles and unit candidates"
+          pattern: "*.json"
+          ontologies: []
+  failed:
+    - - meta:
+          type: map
+          description: Groovy Map identifying the unit of work, e.g. [ cohort_id:'COHORT_A', dataset_id:'person'
+            ]
+      - "*.failed.json":
+          type: file
+          description: Columns that could not be profiled, each with its raw sample and reason
+          pattern: "*.failed.json"
+          ontologies: []
+  versions:
+    - - ${task.process}:
+          type: string
+          description: The process the versions were collected from
+      - versions.yml:
+          type: file
+          description: File containing software versions
+          pattern: versions.yml
+          ontologies: []
+authors:
+  - "@bolt3x"
+maintainers:
+  - "@bolt3x"

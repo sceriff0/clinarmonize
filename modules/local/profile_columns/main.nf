@@ -26,16 +26,26 @@ process PROFILE_COLUMNS {
     tag "${meta.cohort_id}:${meta.dataset_id}"
     label 'process_single'
 
-    // A Wave-built image resolved from a conda spec ("duckdb=1.5.5
-    // pyyaml=6.0.2" against conda-forge+bioconda), not a base image plus a
-    // runtime install: duckdb/PyYAML are baked in, so the digest below
-    // actually covers what runs, not just what the container started as
-    // (the §11.2 Trap this stood in for prior to fix round 1 -- see
-    // task-3-report.md). It also ships bash, python3 and procps (ps),
-    // which Nextflow's own task wrapper requires for resource-metrics
-    // collection (trace.enabled=true) before this process's script ever
-    // runs.
-    container "wave.seqera.io/wt/211e562aa32e/wave/build:duckdb-1.5.5_pyyaml-6.0.2--d70265250861aaf1@sha256:af953fd9ecb445cb0e62ecb3ca0427c2abb805feb0e7f3e9fd41982e9e03c756"
+    // The runtime for the whole profiling/ledger phase: python3 with duckdb
+    // and PyYAML baked in, not installed at task time, so the digest actually
+    // covers what runs rather than just what the container started as (the
+    // §11.2 Trap this stood in for prior to fix round 1 -- see
+    // task-3-report.md). It also ships bash and procps (ps), which Nextflow's
+    // own task wrapper requires for resource-metrics collection
+    // (trace.enabled=true) before this process's script ever runs.
+    //
+    // Built by containers/duckdb-pyyaml/Dockerfile from the SAME
+    // environment.yml the conda directive below points at, so the two
+    // delivery paths cannot drift.
+    //
+    // This replaces a Wave ephemeral build
+    // (wave.seqera.io/wt/211e562aa32e/...) that stopped resolving within four
+    // days of being pinned: nextflow.config set wave.freeze = true with no
+    // wave.build.repository, so the frozen image lived only in Wave's own
+    // store and its token expired. A digest is only as durable as the
+    // cheapest place someone can still fetch it from.
+    conda "${moduleDir}/environment.yml"
+    container "docker.io/bolt3x/clinarmonize-duckdb:1.5.5_pyyaml6.0.2"
 
     input:
     tuple val(meta), path(table)

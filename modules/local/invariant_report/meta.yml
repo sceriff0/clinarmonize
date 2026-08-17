@@ -1,0 +1,54 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: invariant_report
+description: Collect per-replicate ledger hashes and report whether the invariant held (section 10.1)
+keywords:
+  - invariant
+  - report
+  - leak-detection
+tools:
+  - python:
+      description: Interpreter running this module's script from bin/.
+      homepage: https://www.python.org
+      documentation: https://docs.python.org/3/
+      licence:
+        - PSF-2.0
+      identifier: ""
+input:
+  - - permutation_manifests:
+        type: file
+        description: Per-replicate permutation manifests
+        pattern: "*.permutation.json"
+        ontologies: []
+  - - ledger_hashes:
+        type: list
+        description: One ledger hash per replicate
+  - - seeds:
+        type: list
+        description: Resolved replicate seeds, already parsed by the workflow
+  - - n_required:
+        type: integer
+        description: Number of replicates that must be present for the report to be valid
+  - - scope:
+        type: string
+        description: Scope the invariant is asserted over
+output:
+  report:
+    - - report.json:
+          type: file
+          description: Verdict plus every per-replicate hash. A leak is reported, never silently proved
+          pattern: report.json
+          ontologies: []
+  versions:
+    - - ${task.process}:
+          type: string
+          description: The process the versions were collected from
+      - versions.yml:
+          type: file
+          description: File containing software versions
+          pattern: versions.yml
+          ontologies: []
+authors:
+  - "@bolt3x"
+maintainers:
+  - "@bolt3x"

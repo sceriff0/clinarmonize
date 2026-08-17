@@ -1,0 +1,1930 @@
+<meta charset="utf-8">
+<meta name="schematic-format" content="2">
+<title>clinarmonize — general pipeline schematic · modules, data flow, defaults, gates, outputs</title>
+<style>
+/* ── Tokens: complete light palette on bare :root ─────────────────────────── */
+:root {
+  --paper:      #F6F8FB;
+  --surface:    #FFFFFF;
+  --surface-2:  #EDF1F7;
+  --ink:        #12161D;
+  --ink-2:      #454E5C;
+  --ink-3:      #6B7482;
+  --rule:       #D9E0EA;
+  --rule-soft:  #E8EDF3;
+  --indigo:     #2E3A8C;
+  --indigo-bg:  #E7EAF8;
+  --teal:       #0F6B62;
+  --teal-bg:    #DFF0EC;
+  --ember:      #A63D22;
+  --ember-bg:   #FAE6DF;
+  --code-bg:    #EEF2F7;
+
+  --f-mono: ui-monospace, "SF Mono", "JetBrains Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+  --f-text: "Iowan Old Style", "Charter", "Source Serif 4", "Palatino Linotype", Palatino, Georgia, serif;
+  --f-ui:   ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+
+  --col: 74ch;
+  --col-w: 94ch;   /* structured content: ladders, contracts, tables */
+  --s1: 4px; --s2: 8px; --s3: 14px; --s4: 22px; --s5: 34px; --s6: 54px; --s7: 84px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:     #0E1116;
+    --surface:   #151A21;
+    --surface-2: #1B212A;
+    --ink:       #E4E8EF;
+    --ink-2:     #AEB7C4;
+    --ink-3:     #7F8896;
+    --rule:      #262E39;
+    --rule-soft: #1E252E;
+    --indigo:    #9AA8F2;
+    --indigo-bg: #1C2140;
+    --teal:      #56C4B2;
+    --teal-bg:   #10302D;
+    --ember:     #E4906B;
+    --ember-bg:  #33190F;
+    --code-bg:   #171D25;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:     #0E1116;
+  --surface:   #151A21;
+  --surface-2: #1B212A;
+  --ink:       #E4E8EF;
+  --ink-2:     #AEB7C4;
+  --ink-3:     #7F8896;
+  --rule:      #262E39;
+  --rule-soft: #1E252E;
+  --indigo:    #9AA8F2;
+  --indigo-bg: #1C2140;
+  --teal:      #56C4B2;
+  --teal-bg:   #10302D;
+  --ember:     #E4906B;
+  --ember-bg:  #33190F;
+  --code-bg:   #171D25;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-text);
+  font-size: 17px;
+  line-height: 1.62;
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+:focus-visible { outline: 2px solid var(--indigo); outline-offset: 3px; border-radius: 2px; }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ── Shell ────────────────────────────────────────────────────────────────── */
+.shell { max-width: 1400px; margin: 0 auto; padding: 0 var(--s4); }
+.grid  { display: grid; grid-template-columns: 232px minmax(0, 1fr); gap: var(--s7); align-items: start; }
+@media (max-width: 1020px) { .grid { grid-template-columns: minmax(0,1fr); gap: var(--s4); } .rail { position: static; } }
+
+/* ── Masthead ─────────────────────────────────────────────────────────────── */
+.mast { border-bottom: 1px solid var(--rule); padding: var(--s6) 0 var(--s5); margin-bottom: var(--s6); }
+.eyebrow {
+  font-family: var(--f-mono); font-size: 11.5px; letter-spacing: .13em; text-transform: uppercase;
+  color: var(--ink-3); display: flex; flex-wrap: wrap; gap: var(--s3); margin-bottom: var(--s4);
+}
+.eyebrow b { color: var(--indigo); font-weight: 600; }
+h1 {
+  font-family: var(--f-mono); font-weight: 600; font-size: clamp(27px, 4vw, 42px);
+  line-height: 1.14; letter-spacing: -.022em; margin: 0 0 var(--s3); text-wrap: balance; max-width: 22ch;
+}
+.dek { font-size: 19px; color: var(--ink-2); max-width: 68ch; margin: 0; }
+.dek em { color: var(--ink); font-style: normal; box-shadow: inset 0 -0.42em 0 var(--indigo-bg); }
+
+/* ── Rail ─────────────────────────────────────────────────────────────────── */
+.rail { position: sticky; top: var(--s4); font-family: var(--f-mono); font-size: 12.5px; line-height: 1.5; padding-top: 4px; }
+.rail-h { text-transform: uppercase; letter-spacing: .12em; font-size: 10.5px; color: var(--ink-3); margin-bottom: var(--s3); }
+.rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.rail a { color: var(--ink-2); text-decoration: none; display: grid; grid-template-columns: 2.6em 1fr; gap: 2px; padding: 3px 6px; border-radius: 3px; border-left: 2px solid transparent; }
+.rail a:hover { color: var(--ink); background: var(--surface-2); border-left-color: var(--indigo); }
+.rail .n { color: var(--ink-3); }
+
+/* ── Sections ─────────────────────────────────────────────────────────────── */
+main { padding-bottom: var(--s7); }
+section { margin-bottom: var(--s7); scroll-margin-top: var(--s4); }
+h2 {
+  font-family: var(--f-mono); font-size: 21px; font-weight: 600; letter-spacing: -.01em;
+  margin: 0 0 var(--s2); padding-bottom: var(--s3); border-bottom: 2px solid var(--ink);
+  display: grid; grid-template-columns: 2.9em 1fr; gap: var(--s2); align-items: baseline; max-width: var(--col);
+}
+h2 .n { color: var(--indigo); font-size: 15px; }
+h3 {
+  font-family: var(--f-mono); font-size: 14.5px; font-weight: 600; letter-spacing: .01em;
+  margin: var(--s5) 0 var(--s2); color: var(--ink);
+  display: grid; grid-template-columns: 3.6em 1fr; gap: var(--s2); align-items: baseline;
+}
+h3 .n { color: var(--ink-3); font-weight: 400; }
+h4 { font-family: var(--f-ui); font-size: 13px; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); margin: var(--s4) 0 var(--s2); font-weight: 600; }
+p, ul, ol { max-width: var(--col); }
+p { margin: 0 0 var(--s3); }
+ul, ol { margin: 0 0 var(--s3); padding-left: 1.3em; }
+li { margin-bottom: 5px; }
+li::marker { color: var(--ink-3); }
+strong { font-weight: 600; }
+a { color: var(--indigo); text-underline-offset: 2px; }
+
+.lead { font-size: 18.5px; color: var(--ink-2); max-width: 70ch; margin-bottom: var(--s4); }
+
+/* ── Code ─────────────────────────────────────────────────────────────────── */
+code { font-family: var(--f-mono); font-size: .87em; background: var(--code-bg); padding: 1.5px 5px; border-radius: 3px; }
+pre {
+  font-family: var(--f-mono); font-size: 12.6px; line-height: 1.62; background: var(--surface);
+  border: 1px solid var(--rule); border-left: 3px solid var(--indigo); border-radius: 4px;
+  padding: var(--s3) var(--s4); overflow-x: auto; margin: 0 0 var(--s4);
+}
+pre code { background: none; padding: 0; font-size: inherit; }
+pre .c { color: var(--ink-3); }
+pre .k { color: var(--indigo); font-weight: 600; }
+pre .s { color: var(--teal); }
+pre .bad { color: var(--ember); font-weight: 600; }
+.code-cap { font-family: var(--f-ui); font-size: 12px; color: var(--ink-3); margin: 0 0 var(--s2); letter-spacing: .02em; }
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+.tw { overflow-x: auto; margin: 0 0 var(--s4); border: 1px solid var(--rule); border-radius: 4px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-family: var(--f-ui); font-size: 13px; line-height: 1.5; }
+th, td { text-align: left; padding: 9px 13px; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+thead th {
+  font-family: var(--f-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
+  color: var(--ink-3); background: var(--surface-2); border-bottom: 1px solid var(--rule); white-space: nowrap; font-weight: 600;
+}
+tbody tr:last-child td { border-bottom: none; }
+td code { font-size: 12px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ── Chips: the three leakage classes ─────────────────────────────────────── */
+.chip {
+  display: inline-block; font-family: var(--f-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: .07em; text-transform: uppercase; padding: 2.5px 7px; border-radius: 3px; white-space: nowrap;
+}
+.chip.safe   { background: var(--teal-bg);   color: var(--teal);   border: 1px solid var(--teal); }
+.chip.frozen { background: var(--indigo-bg); color: var(--indigo); border: 1px solid var(--indigo); }
+.chip.stop   { background: var(--ember-bg);  color: var(--ember);  border: 1px solid var(--ember); }
+
+/* ── Callouts ─────────────────────────────────────────────────────────────── */
+.note { border: 1px solid var(--rule); border-left: 3px solid var(--ink-3); background: var(--surface); padding: var(--s3) var(--s4); border-radius: 4px; margin: 0 0 var(--s4); max-width: var(--col); }
+.note.stop { border-left-color: var(--ember); background: var(--ember-bg); }
+.note.safe { border-left-color: var(--teal); background: var(--teal-bg); }
+.note.frozen { border-left-color: var(--indigo); background: var(--indigo-bg); }
+.note > :last-child { margin-bottom: 0; }
+.note .lbl { font-family: var(--f-mono); font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; display: block; margin-bottom: 5px; color: var(--ink-2); }
+.note.stop .lbl { color: var(--ember); }
+.note.safe .lbl { color: var(--teal); }
+.note.frozen .lbl { color: var(--indigo); }
+
+/* ── Invariant plaque ─────────────────────────────────────────────────────── */
+.plaque {
+  border: 2px solid var(--ink); border-radius: 5px; background: var(--surface);
+  padding: var(--s4) var(--s5); margin: 0 0 var(--s4); max-width: var(--col);
+}
+.plaque .eq { font-family: var(--f-mono); font-size: clamp(15px, 2.4vw, 21px); font-weight: 600; letter-spacing: -.01em; margin: 0 0 var(--s2); overflow-x: auto; }
+.plaque .gloss { font-size: 15.5px; color: var(--ink-2); margin: 0; }
+
+/* ── Figures ──────────────────────────────────────────────────────────────── */
+figure { margin: 0 0 var(--s5); }
+figure svg { max-width: 100%; height: auto; display: block; color: var(--ink); }
+figcaption { font-family: var(--f-ui); font-size: 12.5px; color: var(--ink-3); margin-top: var(--s2); max-width: 70ch; line-height: 1.5; }
+
+/* ── Tree ─────────────────────────────────────────────────────────────────── */
+.tree { font-family: var(--f-mono); font-size: 12.4px; line-height: 1.7; background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: var(--s3) var(--s4); overflow-x: auto; margin: 0 0 var(--s4); white-space: pre; }
+.tree .d { color: var(--indigo); font-weight: 600; }
+.tree .cm { color: var(--ink-3); }
+
+
+/* ── Doc strip: canonical library docs for the section above ──────────────── */
+.docs {
+  display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3);
+  font-family: var(--f-ui); font-size: 12px; margin: 0 0 var(--s4);
+  padding: var(--s2) 0 0; max-width: var(--col); align-items: baseline;
+}
+.docs .lbl {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .11em;
+  text-transform: uppercase; color: var(--ink-3); margin-right: 2px;
+}
+.docs a {
+  color: var(--ink-2); text-decoration: none; border-bottom: 1px solid var(--rule);
+  padding-bottom: 1px;
+}
+.docs a:hover { color: var(--indigo); border-bottom-color: var(--indigo); }
+.docs a::after { content: " ↗"; font-size: 9px; color: var(--ink-3); }
+
+/* ── The build ladder: ordered step cards ────────────────────────────────── */
+/* Every domain section carries exactly one ol.steps ladder. Five fixed slots
+   per step, under one headline. Slot labels are real text, never CSS ::before — generated content is
+   unreliably exposed to screen readers and is lost when the card is copy-pasted.
+   The data-slot attribute drives layout and gives validate.mjs a robust hook. */
+.steps {
+  list-style: none; margin: 0 0 var(--s5); padding: 0; max-width: var(--col-w);
+  display: flex; flex-direction: column; gap: var(--s4);
+}
+.step {
+  border: 1px solid var(--rule); border-left: 3px solid var(--indigo); border-radius: 4px;
+  background: var(--surface); padding: var(--s3) var(--s4) var(--s4); margin: 0;
+}
+.step > h3 {
+  margin: 0 0 var(--s3); padding-bottom: var(--s2);
+  border-bottom: 1px solid var(--rule-soft); font-size: 15px;
+}
+.step > h3 .n { color: var(--indigo); font-weight: 600; }
+
+.slot {
+  display: grid; grid-template-columns: 7.6em minmax(0, 1fr); gap: var(--s2) var(--s3);
+  align-items: baseline; margin: 0 0 var(--s3);
+}
+.slot:last-child { margin-bottom: 0; }
+.slot > .lbl {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); padding-top: .35em; white-space: nowrap;
+}
+.slot > :not(.lbl) { min-width: 0; }
+.slot p, .slot ul, .slot ol { max-width: none; margin: 0; font-size: 15.5px; }
+.slot li { margin-bottom: 3px; }
+.slot pre, .slot .tw, .slot .tree, .slot figure { margin: 0; }
+.slot pre { border-left-width: 2px; font-size: 12.2px; }
+
+/* Only two slots take a hue, and they are the two that carry consequence. */
+.slot[data-slot="trap"] > .lbl { color: var(--ember); }
+.slot[data-slot="done"] > .lbl { color: var(--teal); }
+
+.slot[data-slot="docs"] .lnks {
+  display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3);
+  font-family: var(--f-ui); font-size: 12px; align-items: baseline;
+}
+.slot[data-slot="docs"] a {
+  color: var(--ink-2); text-decoration: none;
+  border-bottom: 1px solid var(--rule); padding-bottom: 1px;
+}
+.slot[data-slot="docs"] a:hover { color: var(--indigo); border-bottom-color: var(--indigo); }
+.slot[data-slot="docs"] a::after { content: " ↗"; font-size: 9px; color: var(--ink-3); }
+
+@media (max-width: 700px) {
+  .slot { grid-template-columns: minmax(0, 1fr); gap: var(--s1); }
+  .slot > .lbl { padding-top: 0; }
+}
+
+/* ── ADR entries ─────────────────────────────────────────────────────────── */
+.adr {
+  border: 1px solid var(--rule); border-radius: 4px; background: var(--surface);
+  padding: var(--s3) var(--s4); margin: 0 0 var(--s3); max-width: var(--col);
+}
+.adr-head {
+  display: flex; flex-wrap: wrap; gap: var(--s2) var(--s3); align-items: baseline;
+  margin-bottom: var(--s2);
+}
+.adr-id { font-family: var(--f-mono); font-size: 12px; font-weight: 600; color: var(--indigo); }
+.adr-t  { font-family: var(--f-ui); font-size: 14.5px; font-weight: 600; }
+.adr p { font-size: 15px; margin: 0 0 6px; max-width: none; }
+.adr p:last-child { margin-bottom: 0; }
+.adr .k {
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .09em;
+  text-transform: uppercase; color: var(--ink-3); margin-right: 6px;
+}
+
+/* ── Review index cards ──────────────────────────────────────────────────── */
+.revs { display: flex; flex-direction: column; gap: var(--s2); max-width: var(--col); margin: 0 0 var(--s4); }
+.rev {
+  display: grid; grid-template-columns: auto 1fr auto; gap: var(--s3); align-items: baseline;
+  border: 1px solid var(--rule); border-left: 3px solid var(--indigo); border-radius: 4px;
+  background: var(--surface); padding: var(--s3) var(--s4); text-decoration: none; color: var(--ink);
+  font-family: var(--f-ui); font-size: 13.5px;
+}
+.rev:hover { border-left-color: var(--teal); background: var(--surface-2); }
+.rev .n { font-family: var(--f-mono); font-size: 12px; color: var(--indigo); font-weight: 600; }
+.rev .d { font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-3); }
+.rev-empty {
+  border: 1px dashed var(--rule); border-radius: 4px; padding: var(--s4);
+  color: var(--ink-3); font-family: var(--f-ui); font-size: 13.5px; max-width: var(--col);
+}
+
+/* ── Masthead meta bar ───────────────────────────────────────────────────── */
+.meta {
+  display: flex; flex-wrap: wrap; gap: var(--s2) var(--s5); margin-top: var(--s4);
+  font-family: var(--f-mono); font-size: 11.5px; color: var(--ink-3);
+  border-top: 1px solid var(--rule-soft); padding-top: var(--s3);
+}
+.meta b { color: var(--ink-2); font-weight: 600; }
+
+/* ── Footer ───────────────────────────────────────────────────────────────── */
+footer { border-top: 1px solid var(--rule); padding: var(--s5) 0 var(--s6); font-family: var(--f-ui); font-size: 13px; color: var(--ink-3); }
+footer p { max-width: 74ch; }
+</style>
+
+<div class="shell">
+<header class="mast">
+  <div class="eyebrow">
+    <span><b>clinarmonize / clinicalharmonize</b></span>
+    <span>General Pipeline Schematic</span>
+    <span>rev 2026-08-17 · phase 0</span>
+    <span><a href="p-harmonize.html">← the plan (p-harmonize)</a></span>
+  </div>
+  <h1>What actually runs, and where it refuses to</h1>
+  <p class="dek" style="margin-bottom:0">Every module in the built pipeline, the channels between them, the default of every knob, and — the part the source makes you assemble yourself — <em>the eleven places a run stops rather than guesses</em>.</p>
+  <div class="meta"><span><b>stages</b> 9 declared · 4 built</span><span><b>modules</b> 10 processes</span><span><b>params</b> 30 pipeline-specific</span><span><b>refusal points</b> 11</span><span><b>source</b> rev d5b1cd1</span></div>
+</header>
+
+<div class="grid">
+<nav class="rail" aria-label="Section index">
+  <div class="rail-h">Sections</div>
+  <ol>
+    <li><a href="#s0"><span class="n">§0</span><span>What this is, and the one…</span></a></li>
+    <li><a href="#s1"><span class="n">§1</span><span>The nine-stage graph</span></a></li>
+    <li><a href="#s2"><span class="n">§2</span><span>The data flow, end to end</span></a></li>
+    <li><a href="#s3"><span class="n">§3</span><span>Inputs and their contracts</span></a></li>
+    <li><a href="#s3-5"><span class="n">§3.5</span><span>Worked example, real v…</span></a></li>
+    <li><a href="#s4"><span class="n">§4</span><span>The holdout seal</span></a></li>
+    <li><a href="#s5"><span class="n">§5</span><span>Profile</span></a></li>
+    <li><a href="#s6"><span class="n">§6</span><span>The invariant harness</span></a></li>
+    <li><a href="#s7"><span class="n">§7</span><span>Propose</span></a></li>
+    <li><a href="#s8"><span class="n">§8</span><span>Confirm &amp; compile</span></a></li>
+    <li><a href="#s9"><span class="n">§9</span><span>Every parameter, every def…</span></a></li>
+    <li><a href="#s10"><span class="n">§10</span><span>Every decision point</span></a></li>
+    <li><a href="#s11"><span class="n">§11</span><span>Outputs — the published t…</span></a></li>
+    <li><a href="#s12"><span class="n">§12</span><span>What this does not cover</span></a></li>
+  </ol>
+</nav>
+
+<main>
+
+<section id="s0">
+  <h2><span class="n">§0</span><span>What this is, and the one thing it is built around</span></h2>
+
+  <p class="lead">clinarmonize lifts 1..N clinical cohorts into an OMOP CDM subset that is
+  defined at runtime by a <em>concept pack</em>, not by the pipeline's own source. A reader
+  coming to the repo cold sees ten Nextflow processes and thirty parameters and reasonably
+  assumes the point is the mapping. It is not. The mapping is the easy half.</p>
+
+  <div class="plaque">
+    <p class="eq">Outcome-Blind Mapping</p>
+    <p class="gloss">No harmonization decision — column match, value mapping, unit conversion,
+    endpoint derivation, or linkage threshold — may be a function of the outcome variable.
+    Every structural oddity in the graph below exists to make that testable rather than
+    merely asserted.</p>
+  </div>
+
+  <p>The outcome variable is never a column name in this codebase. It is whatever the pack
+  flags <code>outcome: true</code> (<code>subworkflows/local/ingest/main.nf:110-113</code>
+  refuses a pack that flags none), which is what lets one invariant test defend an oncology
+  run and a critical-care run without a line of code changing.</p>
+
+  <div class="note frozen">
+    <span class="lbl">Read this alongside</span>
+    <p><a href="p-harmonize.html">p-harmonize.html</a> is the <strong>design plan</strong> — eighteen
+    sections of intent, contracts, and rulings written before and during the build. This document is
+    the <strong>as-built</strong> counterpart: it describes only code that exists in the working tree
+    today, and every number in it was read out of a file rather than out of the plan.</p>
+  </div>
+</section>
+
+<section id="s1">
+  <h2><span class="n">§1</span><span>The nine-stage graph — and the gate that says which four exist</span></h2>
+
+  <p class="lead">The pipeline declares nine stages. Four are built. The interesting part is
+  <em>which</em> four: the built set is deliberately not a prefix.</p>
+
+  <figure>
+    <svg role="img" aria-label="Nine declared stages: ingest, profile, link, propose, confirm, map, derive, coverage, emit. Ingest, profile, propose and confirm are built; link, map, derive, coverage and emit are not. An arc skips over link from profile to propose." viewBox="0 0 960 128" width="960" height="128">
+      <g fill="none" stroke="currentColor">
+        <rect x="0" y="44" width="96" height="40" rx="3" stroke-width="1.8"/>
+        <rect x="108" y="44" width="96" height="40" rx="3" stroke-width="1.8"/>
+        <rect x="216" y="44" width="96" height="40" rx="3" stroke-width="1" stroke-dasharray="4 4" opacity=".55"/>
+        <rect x="324" y="44" width="96" height="40" rx="3" stroke-width="1.8"/>
+        <rect x="432" y="44" width="96" height="40" rx="3" stroke-width="1.8"/>
+        <rect x="540" y="44" width="96" height="40" rx="3" stroke-width="1" stroke-dasharray="4 4" opacity=".55"/>
+        <rect x="648" y="44" width="96" height="40" rx="3" stroke-width="1" stroke-dasharray="4 4" opacity=".55"/>
+        <rect x="756" y="44" width="96" height="40" rx="3" stroke-width="1" stroke-dasharray="4 4" opacity=".55"/>
+        <rect x="864" y="44" width="96" height="40" rx="3" stroke-width="1" stroke-dasharray="4 4" opacity=".55"/>
+        <path d="M96 64 L108 64" stroke-width="1"/>
+        <path d="M204 64 L216 64" stroke-width="1" opacity=".5"/>
+        <path d="M312 64 L324 64" stroke-width="1" opacity=".5"/>
+        <path d="M420 64 L432 64" stroke-width="1"/>
+        <path d="M528 64 L540 64" stroke-width="1" opacity=".5"/>
+        <path d="M636 64 L648 64" stroke-width="1" opacity=".5"/>
+        <path d="M744 64 L756 64" stroke-width="1" opacity=".5"/>
+        <path d="M852 64 L864 64" stroke-width="1" opacity=".5"/>
+        <path d="M156 44 C 156 12, 372 12, 372 44" stroke-width="1.6"/>
+      </g>
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="11.5" text-anchor="middle">
+        <text x="48" y="69">ingest</text>
+        <text x="156" y="69">profile</text>
+        <text x="264" y="69" opacity=".55">link</text>
+        <text x="372" y="69">propose</text>
+        <text x="480" y="69">confirm</text>
+        <text x="588" y="69" opacity=".55">map</text>
+        <text x="696" y="69" opacity=".55">derive</text>
+        <text x="804" y="69" opacity=".55">coverage</text>
+        <text x="912" y="69" opacity=".55">emit</text>
+      </g>
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="9" text-anchor="middle" opacity=".7">
+        <text x="48" y="100">BUILT</text>
+        <text x="156" y="100">BUILT</text>
+        <text x="264" y="100">—</text>
+        <text x="372" y="100">BUILT</text>
+        <text x="480" y="100">BUILT</text>
+        <text x="588" y="100">—</text>
+        <text x="696" y="100">—</text>
+        <text x="804" y="100">—</text>
+        <text x="912" y="100">—</text>
+        <text x="264" y="22">the built set skips a stage</text>
+      </g>
+    </svg>
+    <figcaption><code>stageGraph()</code> (<code>workflows/harmonize.nf:49</code>) declares all
+    nine; <code>implementedStages()</code> (<code>:53</code>) names four. <code>link</code> is
+    skipped and <code>propose</code> is built.</figcaption>
+  </figure>
+
+  <p>That gap is why the gate checks the requested stage's own <em>membership</em> rather than
+  walking the graph for the first hole. A contiguity check would refuse
+  <code>--stop_after propose</code> over a hole that nothing downstream of it reads —
+  <code>propose</code> consumes per-dataset profiles directly, never anything <code>link</code>
+  would have produced — while still correctly refusing <code>--stop_after link</code> itself
+  (<code>workflows/harmonize.nf:36-60</code>).</p>
+
+  <div class="note stop">
+    <span class="lbl">Refusal 1 — unbuilt stage</span>
+    <p>Any <code>--stop_after</code> naming a stage outside the built four aborts with the list of
+    what <em>is</em> built. A run that reached the end without the stage having happened would be
+    a silent success, which is the failure mode this gate exists to prevent.</p>
+  </div>
+  <div class="note frozen">
+    <span class="lbl">The one exemption</span>
+    <p>The invariant harness may pass the gate — but only when the requested stage equals
+    <code>--invariant_scope</code> (<code>harmonize.nf:563</code>). The harness's measurement
+    <em>is</em> which contract output an unbuilt stage failed to produce, so refusing it would
+    replace the finding with the refusal. Nothing becomes silent: the report names every
+    replicate that produced no ledger and withholds the verdict <code>proof</code>.</p>
+  </div>
+</section>
+
+<section id="s2">
+  <h2><span class="n">§2</span><span>The data flow, end to end</span></h2>
+
+  <p class="lead">Ten processes, three lanes: what the run is given, what it does, what it
+  writes down. Heavy-bordered boxes are the places a run can stop; dashed boxes are optional
+  or unbuilt. Every path in the right-hand lane is a real published path, taken from
+  <code>conf/modules.config</code>.</p>
+
+  <figure>
+    <svg role="img" aria-label="End-to-end data flow. Inputs on the left feed a vertical spine of ten processes; published outputs leave to the right. The spine runs INGEST, holdout seal and stage gate, STAGE_OPEN_DATASET, PROFILE_COLUMNS, MANIFEST_PROFILING_FAILURES, an optional permutation branch, PROPOSE_CANDIDATES, PROPOSE_CHANNELS, PROPOSE_LEDGER, the human confirm gate, CONFIRM_LEDGER, COMPILE_RULES, and ends at four unbuilt stages." viewBox="0 0 960 1006" width="960" height="1006">
+      <defs>
+        <marker id="fa1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="9.5" letter-spacing="1.2" opacity=".6">
+        <text x="8" y="24">INPUTS</text>
+        <text x="252" y="24">PROCESSES</text>
+        <text x="656" y="24">PUBLISHED OUTPUTS</text>
+      </g>
+
+      <g fill="none" stroke="currentColor" stroke-width="1.3">
+        <rect x="252" y="42"  width="356" height="44" rx="3"/>
+        <rect x="252" y="194" width="356" height="44" rx="3"/>
+        <rect x="252" y="266" width="356" height="44" rx="3"/>
+        <rect x="252" y="490" width="356" height="44" rx="3"/>
+        <rect x="252" y="562" width="356" height="44" rx="3"/>
+        <rect x="252" y="634" width="356" height="44" rx="3"/>
+        <rect x="252" y="790" width="356" height="44" rx="3"/>
+        <rect x="252" y="862" width="356" height="44" rx="3"/>
+      </g>
+
+      <g fill="none" stroke="currentColor" stroke-width="2.4">
+        <rect x="252" y="110" width="356" height="56" rx="3"/>
+        <rect x="252" y="338" width="356" height="56" rx="3"/>
+        <rect x="252" y="706" width="356" height="56" rx="3"/>
+      </g>
+
+      <g fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="5 4" opacity=".65">
+        <rect x="252" y="406" width="150" height="56" rx="3"/>
+        <rect x="252" y="934" width="356" height="48" rx="3"/>
+      </g>
+
+      <g fill="none" stroke="currentColor" stroke-width="1" opacity=".85">
+        <rect x="8" y="42"  width="196" height="44" rx="3"/>
+        <rect x="8" y="110" width="196" height="56" rx="3"/>
+        <rect x="8" y="266" width="196" height="44" rx="3"/>
+        <rect x="8" y="706" width="196" height="56" rx="3"/>
+        <rect x="656" y="110" width="296" height="56" rx="3"/>
+        <rect x="656" y="194" width="296" height="44" rx="3"/>
+        <rect x="656" y="266" width="296" height="44" rx="3"/>
+        <rect x="656" y="338" width="296" height="56" rx="3"/>
+        <rect x="656" y="490" width="296" height="44" rx="3"/>
+        <rect x="656" y="562" width="296" height="44" rx="3"/>
+        <rect x="656" y="634" width="296" height="44" rx="3"/>
+        <rect x="656" y="790" width="296" height="44" rx="3"/>
+        <rect x="656" y="862" width="296" height="44" rx="3"/>
+      </g>
+
+      <g fill="none" stroke="currentColor" stroke-width="1.4" marker-end="url(#fa1)">
+        <path d="M430 86  L430 110"/>
+        <path d="M430 166 L430 194"/>
+        <path d="M430 238 L430 266"/>
+        <path d="M430 310 L430 338"/>
+        <path d="M430 394 L430 490"/>
+        <path d="M430 534 L430 562"/>
+        <path d="M430 606 L430 634"/>
+        <path d="M430 678 L430 706"/>
+        <path d="M430 762 L430 790"/>
+        <path d="M430 834 L430 862"/>
+        <path d="M430 906 L430 934"/>
+      </g>
+
+      <g fill="none" stroke="currentColor" stroke-width="1" marker-end="url(#fa1)" opacity=".85">
+        <path d="M204 64  L252 64"/>
+        <path d="M204 138 L252 138"/>
+        <path d="M204 288 L252 288"/>
+        <path d="M204 734 L252 734"/>
+        <path d="M608 138 L656 138"/>
+        <path d="M608 216 L656 216"/>
+        <path d="M608 288 L656 288"/>
+        <path d="M608 366 L656 366"/>
+        <path d="M608 512 L656 512"/>
+        <path d="M608 584 L656 584"/>
+        <path d="M608 656 L656 656"/>
+        <path d="M608 812 L656 812"/>
+        <path d="M608 884 L656 884"/>
+      </g>
+
+      <g fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="5 4" opacity=".65" marker-end="url(#fa1)">
+        <path d="M430 398 L327 398 L327 406"/>
+        <path d="M327 462 L327 478 L430 478"/>
+      </g>
+
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="11.5" text-anchor="middle">
+        <text x="430" y="61">INGEST</text>
+        <text x="430" y="132">HOLDOUT SEAL  +  STAGE GATE</text>
+        <text x="430" y="213">STAGE_OPEN_DATASET</text>
+        <text x="430" y="285">PROFILE_COLUMNS</text>
+        <text x="430" y="360">MANIFEST_PROFILING_FAILURES</text>
+        <text x="430" y="509">PROPOSE_CANDIDATES</text>
+        <text x="430" y="581">PROPOSE_CHANNELS</text>
+        <text x="430" y="653">PROPOSE_LEDGER</text>
+        <text x="430" y="728">HUMAN GATE</text>
+        <text x="430" y="809">CONFIRM_LEDGER</text>
+        <text x="430" y="881">COMPILE_RULES</text>
+      </g>
+
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="9.5" text-anchor="middle" opacity=".72">
+        <text x="430" y="76">validate sheet + pack · sha256 the pack</text>
+        <text x="430" y="148">filter at channel construction → ch_open</text>
+        <text x="430" y="228">first process ever to stage a table</text>
+        <text x="430" y="300">one task per admitted dataset</text>
+        <text x="430" y="376">run-level failure-rate check</text>
+        <text x="430" y="524">one task per replicate</text>
+        <text x="430" y="596">six independent evidence channels</text>
+        <text x="430" y="668">ranked · deterministic · hashable</text>
+        <text x="430" y="744">a human file, or the run stops here</text>
+        <text x="430" y="824">parse · staleness · rationale</text>
+        <text x="430" y="896">rule_id = sha256(kind, from, to, params)</text>
+        <text x="327" y="428">PERMUTE_OUTCOME</text>
+        <text x="327" y="443">PROFILE_COLUMNS</text>
+        <text x="327" y="456">_PERMUTED</text>
+        <text x="430" y="954">map  ·  derive  ·  coverage  ·  emit</text>
+        <text x="430" y="969">declared, not built in phase 0</text>
+      </g>
+
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="9" opacity=".6">
+        <text x="446" y="426">optional (§6) —</text>
+        <text x="446" y="439">publishes nothing</text>
+      </g>
+
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="9.5" text-anchor="middle" opacity=".9">
+        <text x="106" y="61">--input samplesheet.csv</text>
+        <text x="106" y="76">--concept_pack pack.yaml</text>
+        <text x="106" y="132">--unseal &lt;dataset ids&gt;</text>
+        <text x="106" y="148">locked_model.json</text>
+        <text x="106" y="285">--unit_header_patterns</text>
+        <text x="106" y="300">unit_patterns.yaml</text>
+        <text x="106" y="728">--confirmed_ledger</text>
+        <text x="106" y="744">ledger.confirmed.yaml</text>
+        <text x="804" y="132">results/params_hash.txt</text>
+        <text x="804" y="148">unseal.log  (append-only)</text>
+        <text x="804" y="220">ingest/ingest_manifest.json</text>
+        <text x="804" y="292">profiles/&lt;cohort&gt;.&lt;dataset&gt;.json</text>
+        <text x="804" y="360">profiles/_failed.json</text>
+        <text x="804" y="376">(exit non-zero above the threshold)</text>
+        <text x="804" y="516">propose/candidates.parquet</text>
+        <text x="804" y="581">propose/evidence.parquet</text>
+        <text x="804" y="596">propose/confirmation_plots/</text>
+        <text x="804" y="660">ledger.proposed.yaml</text>
+        <text x="804" y="816">confirm/decisions.json</text>
+        <text x="804" y="888">rules/ruleset.json</text>
+      </g>
+    </svg>
+    <figcaption>Spine order from <code>workflows/harmonize.nf:457-899</code>; published paths from
+    <code>conf/modules.config:15-134</code>. The permutation branch is drawn beside the spine, not
+    on it: it <em>adds</em> replicates to the channel <code>PROPOSE_CANDIDATES</code> consumes and
+    never replaces the baseline pass — see §6.</figcaption>
+  </figure>
+
+  <h3><span class="n">§2.1</span><span>The channels between them</span></h3>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Channel</th><th>Shape</th><th>Built at</th></tr></thead>
+    <tbody>
+      <tr><td><code>ch_datasets</code></td><td><code>[ meta(cohort_id, dataset_id, role, holdout), path(table) ]</code></td><td><code>ingest/main.nf:173</code></td></tr>
+      <tr><td><code>ch_pack</code></td><td><code>[ pack_hash, [variable, ...] ]</code></td><td><code>ingest/main.nf:176</code></td></tr>
+      <tr><td><code>ch_open</code></td><td>as <code>ch_datasets</code>, minus every sealed row</td><td><code>harmonize.nf:526</code></td></tr>
+      <tr><td><code>ch_profiles_by_replicate</code></td><td><code>[ replicate, [profile.json, ...] ]</code> — <code>null</code> keys the baseline</td><td><code>harmonize.nf:704-706</code></td></tr>
+      <tr><td><code>ch_candidates</code></td><td><code>[ replicate, path(candidates.parquet) ]</code></td><td><code>harmonize.nf:715</code></td></tr>
+      <tr><td><code>ch_evidence</code></td><td><code>[ replicate, path(evidence.parquet) ]</code></td><td><code>harmonize.nf:737</code></td></tr>
+      <tr><td><code>ch_ledgers</code></td><td><code>[ replicate, path(ledger.proposed.yaml) ]</code></td><td><code>harmonize.nf:756</code></td></tr>
+      <tr><td><code>ch_confirmed</code></td><td><code>[ cohort_id, dataset_id, column, variable, concept_id, rule_id ]</code></td><td><code>harmonize.nf:846-850</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Two joins carry the whole propose stage: <code>candidates.join(profiles)</code>
+  (<code>harmonize.nf:729</code>) and <code>candidates.join(evidence)</code>
+  (<code>:749</code>), both keyed on <code>replicate</code>. That single key is what keeps a
+  100-seed harness run at 101 propose tasks instead of 101 × <em>n</em> datasets, and what
+  guarantees a replicate is never scored against another replicate's profiles.</p>
+</section>
+
+<section id="s3">
+  <h2><span class="n">§3</span><span>Inputs and the contracts they must satisfy</span></h2>
+
+  <h3><span class="n">§3.1</span><span>The two-level samplesheet</span></h3>
+
+  <p>Five columns, all required. <code>holdout</code> has no default —
+  <code>assets/schema_input.json</code> rejects a sheet that omits the column rather than
+  assuming <code>false</code>, because assuming <code>false</code> silently unseals data.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Column</th><th>Type</th><th>Constraint</th></tr></thead>
+    <tbody>
+      <tr><td><code>cohort_id</code></td><td>string</td><td>required, no spaces; carried into <code>meta</code></td></tr>
+      <tr><td><code>dataset_id</code></td><td>string</td><td>required, no spaces; carried into <code>meta</code></td></tr>
+      <tr><td><code>role</code></td><td>enum</td><td><code>clinical</code> · <code>treatment</code> · <code>biopsy</code> · <code>imaging</code> · <code>other</code></td></tr>
+      <tr><td><code>path</code></td><td>path</td><td>required; must point at an existing file</td></tr>
+      <tr><td><code>holdout</code></td><td>boolean</td><td>required, <code>true</code>/<code>false</code>; a missing column is a rejected sheet</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note stop">
+    <span class="lbl">Refusal 2 — duplicate dataset</span>
+    <p>A repeated <code>(cohort_id, dataset_id)</code> aborts before anything is written, naming
+    every offending row number (<code>subworkflows/local/ingest/main.nf:31-47</code>). The check
+    runs <em>before</em> <code>params_hash.txt</code> is written, so a rejected sheet leaves no
+    trace at all.</p>
+  </div>
+
+  <h3><span class="n">§3.2</span><span>The concept pack — the pipeline's target variable set</span></h3>
+
+  <p>The pack is what makes this a general harmonizer rather than a study-specific script: the
+  set of variables to map to is data, supplied at runtime, never source. Four top-level keys are
+  mandatory (<code>pack</code>, <code>version</code>, <code>vocabulary</code>,
+  <code>variables</code>), and each variable must carry <code>name</code> and
+  <code>domain</code>; <code>domain: derived</code> then requires <code>derivation</code>, and
+  every other domain requires <code>concept_id</code> and <code>type</code>
+  (<code>ingest/main.nf:64-107</code>).</p>
+
+  <p class="code-cap">assets/packs/minimal.yaml — the default pack, in full</p>
+  <pre><code>pack: minimal-generic
+version: 0.1.0
+vocabulary: athena-2026-08 <span class="c"># pinned release; hashed</span>
+variables:
+  - name: age_at_index
+    domain: person
+    concept_id: 0
+    type: continuous
+  - name: sex
+    domain: person
+    concept_id: 0
+    type: nominal
+    <span class="s">domain_values: [male, female, other, unknown]</span>
+  - name: vital_status
+    domain: observation
+    concept_id: 0
+    type: nominal
+    <span class="s">domain_values: [alive, dead, unknown]</span>
+  - name: time_to_event
+    domain: derived
+    derivation: survival_time
+    unit: day
+    <span class="k">outcome: true</span> <span class="c"># excluded from EVERY channel</span></code></pre>
+
+  <div class="note stop">
+    <span class="lbl">Refusal 3 — a pack with no outcome</span>
+    <p>A pack where no variable carries <code>outcome: true</code> is rejected outright
+    (<code>ingest/main.nf:110-113</code>). Without that flag the invariant has nothing to be an
+    invariant <em>about</em>, and the permutation harness would silently certify a run in which it
+    permuted nothing.</p>
+  </div>
+
+  <p>The pack is hashed (<code>sha256</code> of its bytes, <code>ingest/main.nf:141</code>) and
+  the hash travels on <code>ch_pack</code>. A relative <code>--concept_pack</code> resolves
+  against <code>projectDir</code>, not the launch directory — nf-test launches from its own
+  sandbox, and <code>file()</code> would otherwise silently resolve the default to a path that
+  does not exist (<code>ingest/main.nf:122-131</code>).</p>
+</section>
+
+<section id="s3-5">
+  <h2><span class="n">§3.5</span><span>A worked example — every parameter, every module, every output, with real values</span></h2>
+
+  <div class="note safe">
+    <span class="lbl">How this section was produced</span>
+    <p>Not described — <strong>executed</strong>. The six CSVs below were written to disk and put
+    through <code>bin/profile_columns.py</code>, <code>propose_candidates.py</code>,
+    <code>propose_channels.py</code>, <code>propose_ledger.py</code>,
+    <code>confirm_ledger.py</code>, <code>compile_rules.py</code>,
+    <code>permute_outcome.py</code> and <code>invariant_report.py</code> at the pipeline's default
+    parameters, using the same <code>duckdb 1.5.5</code> / <code>pyyaml 6.0.2</code> the container
+    pins. Every table, hash, score and error message below is copied from that run's output.
+    Several results contradict what the source code reads like it will do; those are called out.</p>
+  </div>
+
+  <h3><span class="n">§3.5.1</span><span>The study — three cohorts, four modalities</span></h3>
+
+  <figure>
+    <svg role="img" aria-label="A cohort by modality grid. Cohort A has clinical, treatment and biopsy datasets. Cohort B has clinical and imaging. Cohort C has clinical only and is held out, so it is never read." viewBox="0 0 960 300" width="960" height="300">
+      <defs>
+        <marker id="fa3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="10" letter-spacing="1.1" opacity=".6">
+        <text x="16" y="26">COHORT</text>
+        <text x="168" y="26">clinical</text>
+        <text x="308" y="26">treatment</text>
+        <text x="448" y="26">biopsy</text>
+        <text x="588" y="26">imaging</text>
+        <text x="736" y="26">SEAL</text>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1.2">
+        <rect x="160" y="44"  width="128" height="38" rx="3"/>
+        <rect x="300" y="44"  width="128" height="38" rx="3"/>
+        <rect x="440" y="44"  width="128" height="38" rx="3"/>
+        <rect x="160" y="102" width="128" height="38" rx="3"/>
+        <rect x="580" y="102" width="128" height="38" rx="3"/>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1.2" stroke-dasharray="5 4" opacity=".6">
+        <rect x="160" y="160" width="128" height="38" rx="3"/>
+      </g>
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="11">
+        <text x="16" y="68">COHORT_A</text>
+        <text x="16" y="126">COHORT_B</text>
+        <text x="16" y="184" opacity=".6">COHORT_C</text>
+      </g>
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="9.5" text-anchor="middle" opacity=".78">
+        <text x="224" y="68">a_clinical</text>
+        <text x="364" y="68">a_treatment</text>
+        <text x="504" y="68">a_biopsy</text>
+        <text x="224" y="126">b_clinical</text>
+        <text x="644" y="126">b_imaging</text>
+        <text x="224" y="184">c_clinical</text>
+      </g>
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="9.5" opacity=".78">
+        <text x="736" y="68">open — 12 columns</text>
+        <text x="736" y="126">open — 10 columns</text>
+        <text x="736" y="184">holdout: true</text>
+        <text x="736" y="197">0 columns ever read</text>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4" opacity=".55" marker-end="url(#fa3)">
+        <path d="M288 63 L300 63"/>
+        <path d="M428 63 L440 63"/>
+      </g>
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="9" opacity=".6">
+        <text x="300" y="236">dashed, horizontally — join patient-wise WITHIN a cohort. This is the unbuilt</text>
+        <text x="300" y="249">'link' stage: today each dataset is profiled and proposed on its own.</text>
+        <text x="300" y="272">stacked vertically — union variable-wise ACROSS cohorts, after mapping.</text>
+        <text x="300" y="285">Downstream of the four unbuilt stages, so also not reachable today.</text>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1" opacity=".45">
+        <path d="M120 44 L120 198"/>
+        <path d="M116 121 L124 121"/>
+      </g>
+    </svg>
+    <figcaption>22 columns are profiled in this run; COHORT_C's 5 are not, and that is visible in
+    the DAG rather than only in a log line.</figcaption>
+  </figure>
+
+  <p class="code-cap">samplesheet.csv</p>
+  <pre><code>cohort_id,dataset_id,role,path,holdout
+COHORT_A,a_clinical,clinical,data/a_clinical.csv,false
+COHORT_A,a_treatment,treatment,data/a_treatment.csv,false
+COHORT_A,a_biopsy,biopsy,data/a_biopsy.csv,false
+COHORT_B,b_clinical,clinical,data/b_clinical.csv,false
+COHORT_B,b_imaging,imaging,data/b_imaging.csv,false
+COHORT_C,c_clinical,clinical,data/c_clinical.csv,<span class="k">true</span></code></pre>
+
+  <p class="code-cap">the three clinical tables — the same four concepts, three naming conventions</p>
+  <pre><code><span class="c"># data/a_clinical.csv          (8 patients)</span>
+PATIENT_ID,AGE_AT_DX,SEX,VITAL_STAT,OS_DAYS
+A001,64,M,ALIVE,412
+A002,71,F,DEAD,208
+...
+
+<span class="c"># data/b_clinical.csv          (7 patients)</span>
+subject,age_years,gender,vital_status,time_to_event
+B01,59,male,alive,300
+B02,67,female,dead,142
+...
+
+<span class="c"># data/c_clinical.csv          (3 patients) — SEALED, never opened by this run</span>
+pid,PatientAge,Sex,status,TTE
+C1,60,male,1,220
+...</code></pre>
+
+  <h3><span class="n">§3.5.2</span><span>Stage 1 — ingest: six rows in, five admitted</span></h3>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Parameter</th><th>Value here</th><th>Effect on this run</th></tr></thead>
+    <tbody>
+      <tr><td><code>--input</code></td><td><code>samplesheet.csv</code></td><td>6 rows parsed; <code>(cohort_id, dataset_id)</code> unique, so the duplicate check passes silently</td></tr>
+      <tr><td><code>--concept_pack</code></td><td><code>assets/packs/minimal.yaml</code></td><td>4 variables loaded; <code>time_to_event</code> carries <code>outcome: true</code>, so the pack validates</td></tr>
+      <tr><td><code>--unseal</code></td><td><code>''</code> (unset)</td><td><code>c_clinical</code> is filtered out of <code>ch_open</code>. <strong>5 of 6 datasets proceed</strong></td></tr>
+      <tr><td><code>--params_hash_file</code></td><td><code>results/params_hash.txt</code></td><td>written before any stage runs, from <code>(input, resolved pack path, allow_single_dataset)</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>Output:</strong> <code>results/ingest/ingest_manifest.json</code> — five lines, one per
+  admitted dataset. COHORT_C contributes nothing to it, and no task was ever submitted for
+  <code>c_clinical</code>, so the seal is checkable from <code>.nextflow.log</code>.</p>
+
+  <h3><span class="n">§3.5.3</span><span>Stage 2 — profile: 5 tasks, 22 column records</span></h3>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Parameter</th><th>Value</th><th>What it did to <code>AGE_AT_DX</code></th></tr></thead>
+    <tbody>
+      <tr><td><code>--example_k</code></td><td class="num">5</td><td>stored <code>["64","71","58","66","49"]</code> — the first five values <strong>in row order</strong>, not sorted</td></tr>
+      <tr><td><code>--max_unique_listed</code></td><td class="num">500</td><td>8 distinct values, far under the cap, so <code>unique_truncated: false</code></td></tr>
+      <tr><td><code>--na_strings</code></td><td><code>['', 'NA', 'NULL', '.']</code></td><td>none matched → <code>n_missing: 0</code></td></tr>
+      <tr><td><code>--infer_unit_from_range</code></td><td><code>true</code></td><td><strong>fired.</strong> Values 49–73 sit in 0..100, so it emitted <code>{ucum: "1", source: "range:0..100", confidence: 0.3}</code></td></tr>
+      <tr><td><code>--date_formats</code></td><td>3 formats</td><td>none parsed → <code>inferred_type: "int"</code></td></tr>
+      <tr><td><code>--max_failed_frac</code></td><td class="num">0.05</td><td>0 of 22 columns failed → <code>frac = 0.0</code>, not above the threshold, run continues</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="code-cap">results/profiles/COHORT_A.a_clinical.json — two real records, verbatim</p>
+  <pre><code>{ "column": "AGE_AT_DX",  "inferred_type": "int",
+  "n_rows": 8, "n_missing": 0, "n_unique": 8, "unique_truncated": false,
+  "unique_values": ["49","55","58","61","64","66","71","73"],
+  "example_values": ["64","71","58","66","49"],          <span class="c">← row order, not sorted</span>
+  "quantiles": [49.0, 49.42, 57.25, 62.5, 67.25, 72.86, 73.0],
+  "candidate_units": [{"ucum":"1","source":"range:0..100","confidence":0.3}] }
+
+{ "column": "VITAL_STAT", "inferred_type": "str",
+  "n_rows": 8, "n_missing": 0, "n_unique": 2,
+  "unique_values": ["ALIVE","DEAD"],
+  "example_values": ["ALIVE","DEAD","DEAD","ALIVE","ALIVE"],
+  "quantiles": [], "candidate_units": [] }</code></pre>
+
+  <div class="note frozen">
+    <span class="lbl">Why <code>example_values</code> is row-ordered, concretely</span>
+    <p><code>["64","71","58","66","49"]</code> is not sorted and not the first five unique values —
+    it is literally rows 1–5. That is the <em>only</em> reason a within-column shuffle is visible to
+    anything downstream, and it is what makes §3.5.9's harness a real measurement rather than a
+    comparison of a run against itself.</p>
+  </div>
+
+  <h3><span class="n">§3.5.4</span><span>Stage 3 — candidates: 24 rows, of which 6 name a variable</span></h3>
+
+  <p>One <code>PROPOSE_CANDIDATES</code> task consumes all five profiles at once. With
+  <code>--candidate_generators ['name_ngram','value_set','unit']</code> and the outcome variable
+  stripped from the target set, the candidate variable set is
+  <code>['age_at_index','sex','vital_status']</code> — <code>time_to_event</code> is not in it.</p>
+
+  <p class="code-cap">results/propose/candidates.parquet — the rows that name a variable</p>
+  <div class="tw">
+  <table>
+    <thead><tr><th>cohort_id</th><th>dataset_id</th><th>column</th><th>variable</th><th>generator_id</th></tr></thead>
+    <tbody>
+      <tr><td><code>COHORT_A</code></td><td><code>a_clinical</code></td><td><code>AGE_AT_DX</code></td><td><code>age_at_index</code></td><td><code>name_ngram</code></td></tr>
+      <tr><td><code>COHORT_A</code></td><td><code>a_clinical</code></td><td><code>SEX</code></td><td><code>sex</code></td><td><code>name_ngram</code></td></tr>
+      <tr><td><code>COHORT_A</code></td><td><code>a_clinical</code></td><td><code>VITAL_STAT</code></td><td><code>vital_status</code></td><td><code>name_ngram</code></td></tr>
+      <tr><td><code>COHORT_A</code></td><td><code>a_clinical</code></td><td><code>VITAL_STAT</code></td><td><code>vital_status</code></td><td><code>value_set</code></td></tr>
+      <tr><td><code>COHORT_B</code></td><td><code>b_clinical</code></td><td><code>gender</code></td><td><code>sex</code></td><td><code>value_set</code></td></tr>
+      <tr><td><code>COHORT_B</code></td><td><code>b_clinical</code></td><td><code>vital_status</code></td><td><code>vital_status</code></td><td><code>name_ngram</code></td></tr>
+      <tr><td><code>COHORT_B</code></td><td><code>b_clinical</code></td><td><code>vital_status</code></td><td><code>vital_status</code></td><td><code>value_set</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>The other <strong>18</strong> rows — <code>PATIENT_ID</code>, <code>OS_DAYS</code>,
+  <code>age_years</code>, <code>LINE</code>, <code>GRADE</code>, <code>modality</code>,
+  <code>lesion_count</code> and the rest — are emitted with <code>variable = NULL</code> and
+  <code>concept_id = NULL</code>. Nothing matched; the row still exists.</p>
+
+  <div class="note stop">
+    <span class="lbl">Where the unmatched columns are NOT</span>
+    <p>They are in <code>candidates.parquet</code>, and they are <strong>absent from
+    <code>ledger.proposed.yaml</code> entirely</strong> — the ledger builder selects
+    <code>WHERE variable IS NOT NULL</code> (<code>bin/propose_ledger.py:97-100</code>). A reviewer
+    reading only the ledger will not see that <code>age_years</code> exists and matched nothing.
+    That gap is only visible in the parquet.</p>
+  </div>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Column</th><th>Result</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td><code>AGE_AT_DX</code></td><td><code>age_at_index</code></td><td>trigram Jaccard <strong>0.30</strong> ≥ <code>NAME_NGRAM_THRESHOLD</code> 0.2</td></tr>
+      <tr><td><code>age_years</code></td><td><span class="chip stop">nothing</span></td><td>trigram Jaccard against <code>age_at_index</code> is below 0.2, and the pack gives that variable no <code>domain_values</code> and no <code>unit</code>, so the other two generators cannot fire</td></tr>
+      <tr><td><code>gender</code></td><td><code>sex</code></td><td><strong>name similarity is 0.00.</strong> Found only because <code>{male, female}</code> ⊂ the pack's <code>domain_values</code>, at overlap 1.0 ≥ <code>VALUE_SET_OVERLAP_THRESHOLD</code> 0.5</td></tr>
+      <tr><td><code>OS_DAYS</code></td><td><span class="chip frozen">nothing, by construction</span></td><td><code>time_to_event</code> is <code>outcome: true</code> and never enters the candidate variable set</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><code>gender</code> is the clearest argument for having more than one generator: the single
+  most obvious mapping in the entire study is invisible to name matching and is recovered purely
+  from its values.</p>
+
+  <h3><span class="n">§3.5.5</span><span>Stage 4 — evidence: where the configured weights stop being the weights</span></h3>
+
+  <p class="lead">This is the stage whose behaviour is least predictable from reading the config,
+  and the run produced three results worth stopping on.</p>
+
+  <p class="code-cap">results/propose/evidence.parquet — one candidate's six rows, verbatim</p>
+  <div class="tw">
+  <table>
+    <thead><tr><th>candidate</th><th>channel</th><th>score</th><th>status</th><th>effective_weight</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="6"><code>COHORT_A::a_clinical::AGE_AT_DX::age_at_index</code></td><td><code>name_similarity</code></td><td class="num">0.95</td><td>scored</td><td class="num">0.375</td></tr>
+      <tr><td><code>type_agreement</code></td><td class="num">1.00</td><td>scored</td><td class="num">0.375</td></tr>
+      <tr><td><code>cardinality</code></td><td class="num">1.00</td><td>scored</td><td class="num">0.250</td></tr>
+      <tr><td><code>value_overlap</code></td><td class="num">—</td><td><span class="chip stop">could-not-score</span></td><td class="num">0.000</td></tr>
+      <tr><td><code>unit_plausibility</code></td><td class="num">—</td><td><span class="chip stop">could-not-score</span></td><td class="num">0.000</td></tr>
+      <tr><td><code>distribution_distance</code></td><td class="num">—</td><td><span class="chip stop">no-reference</span></td><td class="num">0.000</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>Result 1 — <code>--channel_weights</code> is not what gets applied</h4>
+
+  <p>You configured <code>value: 0.30</code>. No candidate in this run was ever scored with a
+  weight of 0.30. Channels that cannot score are dropped and the remaining weights are
+  <strong>renormalised per candidate</strong>:</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Channel</th><th>Configured</th><th>Effective for <code>AGE_AT_DX</code><br>(3 channels scored)</th><th>Effective for <code>SEX</code><br>(4 channels scored)</th></tr></thead>
+    <tbody>
+      <tr><td><code>value_overlap</code></td><td class="num">0.30</td><td class="num">0.000</td><td class="num">0.4286</td></tr>
+      <tr><td><code>name_similarity</code></td><td class="num">0.15</td><td class="num">0.375</td><td class="num">0.2143</td></tr>
+      <tr><td><code>type_agreement</code></td><td class="num">0.15</td><td class="num">0.375</td><td class="num">0.2143</td></tr>
+      <tr><td><code>cardinality</code></td><td class="num">0.10</td><td class="num">0.250</td><td class="num">0.1429</td></tr>
+      <tr><td><code>distribution_distance</code></td><td class="num">0.15</td><td class="num">0.000</td><td class="num">0.000</td></tr>
+      <tr><td><code>unit_plausibility</code></td><td class="num">0.15</td><td class="num">0.000</td><td class="num">0.000</td></tr>
+      <tr><td><strong>sum</strong></td><td class="num">1.00</td><td class="num">1.000</td><td class="num">1.000</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>For <code>AGE_AT_DX</code> only <code>0.15 + 0.15 + 0.10 = 0.40</code> of configured weight
+  could score, so each survivor is divided by 0.40: <code>0.15/0.40 = 0.375</code>,
+  <code>0.10/0.40 = 0.250</code>. For <code>SEX</code> four channels scored, summing 0.70:
+  <code>0.30/0.70 = 0.4286</code>. <strong>The weight a channel actually carries depends on which
+  other channels happened to be scoreable for that candidate.</strong> Tuning
+  <code>--channel_weights</code> without knowing that will not do what you expect.</p>
+
+  <h4>Result 2 — two of the six channels never scored anything, all run</h4>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Channel</th><th>Status in this run</th><th>Reason, from <code>detail</code></th></tr></thead>
+    <tbody>
+      <tr><td><code>unit_plausibility</code></td><td>0 of 5 candidates scored</td><td><em>"variable declares no unit"</em> — in the minimal pack only <code>time_to_event</code> has a <code>unit</code>, and it is outcome-excluded</td></tr>
+      <tr><td><code>distribution_distance</code></td><td>0 of 5 candidates scored</td><td><em>"no CONFIRMED columns exist"</em> — it compares against previously confirmed mappings, and on a first run there are none</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note stop">
+    <span class="lbl">The bootstrapping trap</span>
+    <p><code>distribution_distance</code> cannot contribute to the <em>first</em> run of any study,
+    because its reference set is what earlier runs confirmed. 30% of the configured weight
+    (<code>dist</code> 0.15 + <code>unit</code> 0.15) is inert here, and the pipeline reports this
+    honestly in the <code>detail</code> column rather than scoring 0.0 and dragging every total
+    down — a distinction that matters, since a 0.0 score and an unscoreable channel mean opposite
+    things.</p>
+  </div>
+
+  <h4>Result 3 — the name algorithm changes between stages</h4>
+
+  <p><code>AGE_AT_DX</code> → <code>age_at_index</code> scored <strong>0.30</strong> at the
+  generator and <strong>0.95</strong> at the channel. Both are correct: the generator uses
+  character-trigram Jaccard (<code>bin/propose_candidates.py:75-81</code>) to decide <em>whether to
+  propose at all</em>; the channel uses Jaro-Winkler to decide <em>how good the proposal is</em>.
+  Two different algorithms with the word "name" in both. Do not compare the numbers.</p>
+
+  <h3><span class="n">§3.5.6</span><span>Stage 5 — the ledger, and a result that inverts intuition</span></h3>
+
+  <p class="code-cap">results/ledger.proposed.yaml — verbatim, all five entries abridged to their scores</p>
+  <pre><code>- cohort_id: COHORT_A
+  dataset_id: a_clinical
+  column: AGE_AT_DX
+  proposals:
+  - variable: age_at_index
+    concept_id: 0
+    <span class="k">total: 0.9812</span>
+    evidence: {name: 0.95, type: 1.0, card: 1.0, value: null, dist: null, unit: null}
+    confirmation_plot: propose/confirmation_plots/COHORT_A_a_clinical_AGE_AT_DX_age_at_index-4aa8a0c5.svg
+    excluded_candidates: 0
+
+- column: SEX          <span class="k">total: 0.5</span>     {name: 1.0,    type: 1.0, card: 0.5,    value: 0.0,    dist: null, unit: null}
+- column: VITAL_STAT   <span class="k">total: 0.8024</span>  {name: 0.9667, type: 1.0, card: 0.6667, value: 0.6667, dist: null, unit: null}
+- column: gender       <span class="k">total: 0.6071</span>  {name: 0.5,    type: 1.0, card: 0.5,    value: 0.5,    dist: null, unit: null}
+- column: vital_status <span class="k">total: 1.0</span>     {name: 1.0,    type: 1.0, card: 1.0,    value: 1.0,    dist: null, unit: null}</code></pre>
+
+  <div class="note stop">
+    <span class="lbl">The inversion: <code>SEX</code> scores 0.5, <code>gender</code> scores 0.6071</span>
+    <p><code>SEX</code> → <code>sex</code> is a perfect name match (1.00). <code>gender</code> →
+    <code>sex</code> is a name match of 0.50. <strong>The worse-named column wins</strong>, because
+    <code>SEX</code>'s values are <code>M/F</code> — Jaccard 0.0 against the pack's
+    <code>[male, female, other, unknown]</code> — while <code>gender</code>'s are
+    <code>male/female</code>, Jaccard 0.5. <code>value_overlap</code> carries an effective 0.4286,
+    twice any other live channel, so a zero there is decisive.</p>
+    <p>This is the weight configuration working exactly as specified, producing a ranking a human
+    would not have guessed. It is also the case for the confirmation plot: the reviewer needs to
+    see that <code>SEX</code>'s low score is a <em>value-encoding</em> problem, not a wrong
+    mapping.</p>
+  </div>
+
+  <p>The arithmetic is checkable by hand, which is the point of publishing
+  <code>effective_weight</code>:</p>
+
+  <pre><code>AGE_AT_DX  = 0.95·0.375 + 1.0·0.375 + 1.0·0.250              = 0.98125 → <span class="k">0.9812</span>
+SEX        = 1.00·0.2143 + 1.0·0.2143 + 0.5·0.1429 + 0.0·0.4286 = 0.50000 → <span class="k">0.5</span>
+gender     = 0.50·0.2143 + 1.0·0.2143 + 0.5·0.1429 + 0.5·0.4286 = 0.60714 → <span class="k">0.6071</span>
+VITAL_STAT = 0.9667·0.2143 + 1.0·0.2143 + 0.6667·0.1429 + 0.6667·0.4286 = 0.80238 → <span class="k">0.8024</span>
+
+<span class="c"># --ledger_float_precision 4 is what turns 0.98125 into 0.9812 and 0.80238 into 0.8024.</span>
+<span class="c"># Without it the ledger's sha256 would depend on a float's last bit.</span></code></pre>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Parameter</th><th>Value</th><th>Effect here</th></tr></thead>
+    <tbody>
+      <tr><td><code>--ledger_top_k</code></td><td class="num">5</td><td>every column had exactly 1 proposal, so nothing was truncated; <code>excluded_candidates: 0</code> throughout</td></tr>
+      <tr><td><code>--ledger_float_precision</code></td><td class="num">4</td><td>0.98125 → 0.9812, 0.607142857… → 0.6071 — the rounding that makes the hash stable</td></tr>
+      <tr><td><code>--emit_confirmation_plots</code></td><td><code>true</code></td><td>5 SVGs written, one per proposal, each named and referenced from its ledger entry</td></tr>
+      <tr><td><code>--max_candidates_per_column</code></td><td class="num">20</td><td>never reached — the most any column produced was 1 distinct variable</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><strong>The file's sha256 is
+  <code>c0fbde87b6294db7bfe353617cf50f790b196512dd8226c920234cf6d4bd3bba</code>.</strong> Hold onto
+  that number; §3.5.9 is entirely about whether it moves.</p>
+
+  <h3><span class="n">§3.5.7</span><span>Stage 6 — the gate, and what a stale ledger actually looks like</span></h3>
+
+  <p>With <code>--confirmed_ledger</code> unset the run stops here. To continue, a human writes the
+  file. Each row must carry the proposed ledger's hash:</p>
+
+  <p class="code-cap">ledger.confirmed.yaml — one row of five, as authored</p>
+  <pre><code>- cohort_id: COHORT_A
+  dataset_id: a_clinical
+  column: AGE_AT_DX
+  <span class="k">decision: accept</span>
+  variable: age_at_index
+  concept_id: 0
+  confirmed_by: v.fassivale
+  rationale: "Age at diagnosis; index date is diagnosis for this cohort."
+  proposed_hash: "sha256:c0fbde87b6294db7bfe353617cf50f790b196512dd8226c920234cf6d4bd3bba"</code></pre>
+
+  <p class="code-cap">results/confirm/decisions.json — the normalised output, verbatim</p>
+  <pre><code>{ "cohort_id": "COHORT_A", "dataset_id": "a_clinical", "column": "AGE_AT_DX",
+  "decision": "accept", "variable": "age_at_index", "concept_id": 0,
+  "unit_in": null, "confirmed_by": "v.fassivale",
+  "rationale": "Age at diagnosis; index date is diagnosis for this cohort." }</code></pre>
+
+  <h4>What each confirm parameter did, tested</h4>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Parameter</th><th>Value</th><th>Observed behaviour</th></tr></thead>
+    <tbody>
+      <tr><td><code>--require_rationale</code></td><td><code>true</code></td><td>all five rows carry a rationale, so all five passed. Blanking one is refused at parse time, before any file is written</td></tr>
+      <tr><td><code>--allow_stale_ledger</code></td><td><code>false</code></td><td>see the experiment below — the run stops with the diff</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p class="code-cap">experiment — change one score in ledger.proposed.yaml (0.5 → 0.51) and re-run confirm</p>
+  <pre><code><span class="bad">ledger.confirmed.yaml is stale against the current ledger.proposed.yaml (5 row(s) disagree).</span>
+Re-review against the current proposals, or pass --allow_stale_ledger if this drift is
+expected (e.g. a pack bump that did not change these proposals):
+  row 1 (COHORT_A/a_clinical/AGE_AT_DX): proposed_hash='sha256:c0fbde87...bba',
+    current ledger.proposed.yaml hashes to 'sha256:dcfde8c2...6fe'
+  row 2 (COHORT_A/a_clinical/SEX): ...
+  row 3 (COHORT_A/a_clinical/VITAL_STAT): ...</code></pre>
+
+  <p>Note that <strong>all five rows are flagged, not the one that changed</strong>: the hash is
+  over the whole file, so any drift anywhere invalidates every row. That is deliberate — a
+  reviewer's judgement on <code>SEX</code> was formed while looking at a ledger in which
+  <code>gender</code> also said something, and the check refuses to assume the rest still holds.</p>
+
+  <h3><span class="n">§3.5.8</span><span>Stage 7 — compile: two claims, both tested</span></h3>
+
+  <p class="code-cap">results/rules/ruleset.json — the first of five rules, verbatim</p>
+  <pre><code>{ "rule_id": "R-2daf7eb8193e75f5f2bc46e12f92521ba0e8724908be260f30ab93c898616794",
+  "rule_version": "0.1.0",
+  "kind": "column_map",
+  "from": { "cohort_id": "COHORT_A", "dataset_id": "a_clinical", "column": "AGE_AT_DX" },
+  "to":   { "variable": "age_at_index", "concept_id": 0 },
+  "params": { "unit_in": null } }</code></pre>
+
+  <div class="note safe">
+    <span class="lbl">Experiment 1 — does a pack bump move the rule ids?</span>
+    <p>Recompiled the identical <code>decisions.json</code> with
+    <code>--pack-version 0.2.0</code>:</p>
+    <pre><code>rule_ids identical : <span class="k">True</span>
+rule_versions moved: ['0.1.0'] -> ['0.2.0']</code></pre>
+    <p>Confirmed. The digest covers <code>(kind, from, to, params)</code> and nothing else, so a
+    version bump is diffable: every <code>rule_version</code> changes, every <code>rule_id</code>
+    stays byte-identical.</p>
+  </div>
+
+  <div class="note stop">
+    <span class="lbl">Experiment 2 — two columns aimed at one target cell</span>
+    <p>Added a second COHORT_A decision mapping <code>OS_DAYS</code> to
+    <code>vital_status</code> and recompiled:</p>
+    <pre><code><span class="bad">rule collision: two rules write the same target cell (never merged):
+  COHORT_A/a_clinical/vital_status written by columns ['OS_DAYS', 'VITAL_STAT']</span>
+exit code: 1</code></pre>
+    <p>Both offending columns are named, and the run stops. With
+    <code>--fail_on_rule_collision false</code> it would proceed, and which rule won would depend
+    on ordering — which is why the default is <code>true</code>.</p>
+  </div>
+
+  <h3><span class="n">§3.5.9</span><span>The invariant harness on this study — one hash, and still not a proof</span></h3>
+
+  <p class="lead">Ten seeds, every admitted dataset permuted, every replicate re-profiled and
+  re-proposed through the same code the baseline used. Here is what came back.</p>
+
+  <p class="code-cap">the permutation, seed 1, COHORT_B's outcome column</p>
+  <pre><code>time_to_event   time_to_event
+   (original)    (permuted)
+        300    →       455
+        142    →       300
+        455    →       398
+         89    →        89     <span class="c">← a fixed point; the multiset is preserved exactly</span>
+        271    →       271
+        398    →       142
+        177    →       177</code></pre>
+
+  <p class="code-cap">sha256 of ledger.proposed.yaml, all ten replicates</p>
+  <pre><code>c0fbde87b6294db7  p1/ledger.proposed.yaml
+c0fbde87b6294db7  p2/ledger.proposed.yaml
+c0fbde87b6294db7  p3/ledger.proposed.yaml
+        ...          (p4 … p9)
+c0fbde87b6294db7  p10/ledger.proposed.yaml
+
+distinct hashes: <span class="k">1</span>          <span class="c"># and identical to the baseline's c0fbde87…</span></code></pre>
+
+  <p>One distinct hash across every replicate. The proposer did not move. So the verdict is
+  <code>proof</code>?</p>
+
+  <p class="code-cap">tests/invariant/report.json — the actual verdict</p>
+  <pre><code>invariant: verdict=<span class="bad">no-outcome-column</span> n_permutations=10 n_distinct_hashes=1
+
+  verdict:                         "no-outcome-column"
+  n_distinct_hashes:               1
+  n_permutations:                  10
+  n_permutations_required:         100
+  <span class="bad">cohorts_without_outcome_column:  ["COHORT_A"]</span>
+  scope:                           "propose"</code></pre>
+
+  <div class="note stop">
+    <span class="lbl">Why, and why it matters more than the hash</span>
+    <p>The harness permutes a column only when its header <em>canonicalises</em> — lowercase, keep
+    alphanumerics only (<code>bin/permute_outcome.py:43-47</code>) — to the pack's outcome variable
+    name:</p>
+    <div class="tw">
+    <table>
+      <thead><tr><th>Cohort</th><th>Column</th><th>canonical()</th><th>Target</th><th>Permuted?</th></tr></thead>
+      <tbody>
+        <tr><td><code>COHORT_A</code></td><td><code>OS_DAYS</code></td><td><code>osdays</code></td><td><code>timetoevent</code></td><td><span class="chip stop">no</span></td></tr>
+        <tr><td><code>COHORT_B</code></td><td><code>time_to_event</code></td><td><code>timetoevent</code></td><td><code>timetoevent</code></td><td><span class="chip safe">yes</span></td></tr>
+        <tr><td><code>COHORT_C</code></td><td><code>TTE</code></td><td><code>tte</code></td><td><code>timetoevent</code></td><td><span class="chip frozen">sealed — never read</span></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>COHORT_A was never perturbed, so its half of the identical hashes proves nothing at all.
+    Reporting <code>proof</code> here would have been a false clearance — and note that the
+    <code>n_distinct_hashes == 1</code> test on its own <em>would</em> have issued one. The guard
+    is what stands between a green tick and a vacuous one.</p>
+    <p>Had that guard passed, <code>insufficient-permutations</code> was waiting behind it: 10 ran,
+    <code>--invariant_n_permutations</code> requires 100.</p>
+  </div>
+
+  <p>Two fixes make this study certifiable, and neither is a threshold change: rename COHORT_A's
+  <code>OS_DAYS</code> to the pack's own outcome name at ingest, or give the pack an alias
+  mechanism so one variable can answer to several source headers.</p>
+
+  <h3><span class="n">§3.5.10</span><span>What the run left on disk</span></h3>
+
+  <div class="tree">results/
+├── params_hash.txt
+├── ingest/ingest_manifest.json          <span class="cm">5 lines — c_clinical is absent</span>
+├── profiles/
+│   ├── COHORT_A.a_clinical.json         <span class="cm">5 column records</span>
+│   ├── COHORT_A.a_treatment.json        <span class="cm">4</span>
+│   ├── COHORT_A.a_biopsy.json           <span class="cm">4</span>
+│   ├── COHORT_B.b_clinical.json         <span class="cm">5</span>
+│   ├── COHORT_B.b_imaging.json          <span class="cm">4   → 22 columns, 0 failed (frac 0.0)</span>
+│   └── _failed.json                     <span class="cm">empty list</span>
+├── propose/
+│   ├── candidates.parquet               <span class="cm">24 rows — 6 name a variable, 18 are null</span>
+│   ├── evidence.parquet                 <span class="cm">30 rows — 5 candidates x 6 channels</span>
+│   └── confirmation_plots/              <span class="cm">5 SVGs</span>
+├── ledger.proposed.yaml                 <span class="cm">5 entries · sha256 c0fbde87…</span>
+├── confirm/decisions.json               <span class="cm">5 rows, all accept</span>
+└── rules/ruleset.json                   <span class="cm">5 rules, all kind: column_map</span>
+
+tests/invariant/report.json              <span class="cm">verdict: no-outcome-column</span>
+
+<span class="cm">NOT produced, because the stages do not exist:</span>
+  any OMOP table · provenance.parquet · a coverage report · any joined or unioned data</div>
+
+  <div class="note stop">
+    <span class="lbl">What five rules actually buy you</span>
+    <p>22 columns were profiled. 5 became rules. Of the 17 that did not: 3 are the outcome columns
+    the pipeline refuses to touch, 2 are age columns nothing matched, and the remaining 12 are
+    identifiers, treatment lines, biopsy grades and imaging fields the minimal pack has no variable
+    for at all. <strong>Coverage is a function of the pack, not of the pipeline</strong> — and
+    measuring that gap is the unbuilt <code>coverage</code> stage's whole job.</p>
+    <p>Nothing applies those five rules. COHORT_A's clinical, treatment and biopsy tables are never
+    joined; COHORT_A and COHORT_B are never unioned. The deliverable at the end of this example is
+    a reviewed, hash-pinned <em>mapping specification</em> — not harmonized data.</p>
+  </div>
+</section>
+
+<section id="s4">
+  <h2><span class="n">§4</span><span>The holdout seal — the filter that has to happen early</span></h2>
+
+  <p class="lead">A dataset marked <code>holdout: true</code> never reaches a process. Not
+  "is ignored by" — never <em>reaches</em>. The filter sits at channel construction, upstream of
+  anything that would stage a file into a work directory.</p>
+
+  <pre><code><span class="c">// workflows/harmonize.nf:526</span>
+def ch_open = INGEST.out.datasets.filter { meta, _table -&gt; HoldoutPolicy_admit(meta, lock) }</code></pre>
+
+  <p>A filter inside a process that <em>reads</em> the table would be decoration: by the time the
+  script runs, Nextflow has already copied the file into the work directory. Because the seal is
+  a channel property, it is also a DAG property — a leaked row would show up in
+  <code>.nextflow.log</code> as a submitted task, so the seal is verifiable from the execution
+  trace and not only from an assertion about channel contents.</p>
+
+  <h3><span class="n">§4.1</span><span>Unsealing is a four-way match, not a flag</span></h3>
+
+  <p><code>--unseal</code> alone does nothing. <code>resolveHoldoutLock()</code>
+  (<code>harmonize.nf:148-189</code>) refuses the run unless all four hold:</p>
+
+  <ol>
+    <li><code>locked_model.json</code> exists at <code>--locked_model</code> and parses as JSON.</li>
+    <li>Its <code>covers</code> list contains <em>every</em> requested dataset id.</li>
+    <li>Its <code>params_hash</code> equals this run's params hash.</li>
+    <li>Its <code>analysis_git_sha</code> equals <code>git rev-parse HEAD</code> of the pipeline
+        about to run.</li>
+  </ol>
+
+  <p>The params hash is deliberately narrow — <code>sha256</code> over exactly
+  <code>input</code>, the <em>resolved</em> concept-pack path, and
+  <code>allow_single_dataset</code> (<code>harmonize.nf:91-98</code>). It excludes the
+  unsealing params themselves, because a "lock this analysis" run never sets them and the later
+  "check against the lock" run always does — including them would make every lock unmatched by
+  construction. It also excludes output-location params, which change where a run reports, not
+  what it computes.</p>
+
+  <div class="note stop">
+    <span class="lbl">Refusals 4–7 — the four lock checks</span>
+    <p>Each failure names the mismatch and ends with the same clause: <em>"No held-out dataset was
+    admitted; <code>unseal.log</code> is unchanged."</em> On success the log is appended
+    <strong>before</strong> the first held-out row is admitted, so the audit trail cannot lag the
+    admission it records.</p>
+  </div>
+
+  <p>Nextflow's own <code>workflow.commitId</code> is not used for check 4: it is only populated
+  for a pulled, versioned pipeline (<code>nextflow run org/pipe -r v1.0</code>), never for the
+  plain local-directory run this pipeline is actually executed as
+  (<code>harmonize.nf:currentGitSha</code>).</p>
+</section>
+
+<section id="s5">
+  <h2><span class="n">§5</span><span>Profile — one evidence record per column</span></h2>
+
+  <p class="lead">Everything that is a pure function of one table's bytes happens in
+  <code>PROFILE_COLUMNS</code>; everything that is a property of the whole run happens in
+  <code>MANIFEST_PROFILING_FAILURES</code>. The split is not stylistic — a single dataset's
+  failure rate is not the run's failure rate.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Field</th><th>What it records</th><th>Knob</th></tr></thead>
+    <tbody>
+      <tr><td><code>column</code></td><td>the verbatim source name, never normalised here</td><td>—</td></tr>
+      <tr><td><code>inferred_type</code></td><td><code>int</code> · <code>float</code> · <code>bool</code> · <code>date</code> · <code>str</code> · <code>empty</code></td><td><code>date_formats</code></td></tr>
+      <tr><td><code>n_rows</code> · <code>n_missing</code> · <code>n_unique</code></td><td>counts; missingness uses the NA vocabulary</td><td><code>na_strings</code></td></tr>
+      <tr><td><code>unique_values</code> · <code>unique_truncated</code></td><td>the distinct set, and whether it was cut off</td><td><code>max_unique_listed</code></td></tr>
+      <tr><td><code>quantiles</code></td><td>the numeric shape a distribution channel later scores</td><td>—</td></tr>
+      <tr><td><code>candidate_units</code></td><td>UCUM guesses with a source and a confidence</td><td><code>unit_header_patterns</code>, <code>infer_unit_from_range</code></td></tr>
+      <tr><td><code>example_values</code></td><td>the first <em>k</em> non-missing values <strong>in row order</strong></td><td><code>example_k</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note frozen">
+    <span class="lbl">Why "in row order" matters</span>
+    <p><code>example_values</code> being row-ordered is what makes a within-column shuffle
+    observable at all (<code>bin/profile_columns.py:290</code>). A harness that reused the
+    baseline profiles would be comparing a run against itself and would report "no leak" forever
+    — which is why §6 re-profiles every permuted replicate rather than caching.</p>
+  </div>
+
+  <h3><span class="n">§5.1</span><span>Unit inference, and what it will not claim</span></h3>
+
+  <p>A header matching a pattern in <code>assets/unit_patterns.yaml</code> yields a UCUM candidate
+  at that pattern's own confidence. Failing that, and only when
+  <code>--infer_unit_from_range</code> is on, the value range yields a candidate at a fixed
+  confidence of <code>0.3</code>: a <code>0..1</code> or <code>0..100</code> range suggests a
+  proportion, a <code>0..60</code> range suggests the ambiguous day/month pair
+  (<code>bin/profile_columns.py:150-165</code>). The <code>0.3</code> is the point — a range-derived
+  unit is evidence, never a decision.</p>
+
+  <h3><span class="n">§5.2</span><span>Failure is counted, not swallowed</span></h3>
+
+  <p>Three failure reasons exist: <code>encoding</code>, <code>mixed_type</code>, and
+  <code>unreadable</code>, each carrying up to <code>--fail_sample_k</code> offending values
+  (<code>bin/profile_columns.py:238, 252, 300</code>). Per-dataset failure files are
+  <em>not</em> published — only the collated <code>profiles/_failed.json</code> is
+  (<code>conf/modules.config:25-36</code>).</p>
+
+  <div class="note stop">
+    <span class="lbl">Refusal 8 — too much of the run failed to profile</span>
+    <p><code>frac = total_failed / total_columns</code>; the run exits non-zero when
+    <code>frac &gt; --max_failed_frac</code> (default <code>0.05</code>,
+    <code>bin/manifest_profiling_failures.py:47-52</code>). It is a strict inequality over the
+    <em>run's</em> columns, so one pathological dataset among twenty does not stop a run, and a
+    systematically broken encoding does.</p>
+  </div>
+</section>
+
+<section id="s6">
+  <h2><span class="n">§6</span><span>The invariant harness — the branch that only exists to try to fail</span></h2>
+
+  <p class="lead">Set <code>--permute_outcome_seed</code> and the pipeline grows a second,
+  parallel population of replicates. Every one of them travels the identical code path the real
+  run uses. If the proposal ledger moves, something read the outcome.</p>
+
+  <figure>
+    <svg role="img" aria-label="The permutation harness. ch_open splits into a baseline branch through PROFILE_COLUMNS with replicate null, and a harness branch through PERMUTE_OUTCOME then PROFILE_COLUMNS_PERMUTED with replicate equal to the seed. Both merge through mix and groupTuple into the propose chain, one task per replicate, and the resulting ledger hashes go to INVARIANT_REPORT." viewBox="0 0 960 440" width="960" height="440">
+      <defs>
+        <marker id="fa2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+
+      <g fill="none" stroke="currentColor" stroke-width="1.3">
+        <rect x="370" y="20"  width="220" height="36" rx="3"/>
+        <rect x="120" y="100" width="230" height="44" rx="3"/>
+        <rect x="330" y="248" width="300" height="40" rx="3"/>
+        <rect x="280" y="312" width="400" height="40" rx="3"/>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="5 4" opacity=".75">
+        <rect x="610" y="96" width="230" height="56" rx="3"/>
+        <rect x="610" y="166" width="230" height="56" rx="3"/>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="2.4">
+        <rect x="300" y="376" width="360" height="48" rx="3"/>
+      </g>
+
+      <g fill="none" stroke="currentColor" stroke-width="1.3" marker-end="url(#fa2)">
+        <path d="M480 56 L480 78 L235 78 L235 100"/>
+        <path d="M235 144 L235 234 L480 234 L480 248"/>
+        <path d="M480 288 L480 312"/>
+        <path d="M480 352 L480 376"/>
+      </g>
+      <g fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="5 4" opacity=".75" marker-end="url(#fa2)">
+        <path d="M480 56 L480 78 L725 78 L725 96"/>
+        <path d="M725 152 L725 166"/>
+        <path d="M725 222 L725 234 L480 234 L480 248"/>
+      </g>
+
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="11.5" text-anchor="middle">
+        <text x="480" y="43">ch_open</text>
+        <text x="235" y="119">PROFILE_COLUMNS</text>
+        <text x="725" y="119">PERMUTE_OUTCOME</text>
+        <text x="725" y="189">PROFILE_COLUMNS_PERMUTED</text>
+        <text x="480" y="266">mix  +  groupTuple(replicate)</text>
+        <text x="480" y="330">PROPOSE_CANDIDATES → CHANNELS → LEDGER</text>
+        <text x="480" y="399">INVARIANT_REPORT</text>
+      </g>
+      <g fill="currentColor" font-family="ui-monospace, monospace" font-size="9.5" text-anchor="middle" opacity=".72">
+        <text x="480" y="94">the admitted datasets, sealed once, shared by both branches</text>
+        <text x="235" y="134">baseline · replicate = null</text>
+        <text x="725" y="134">shuffle the outcome column</text>
+        <text x="725" y="147">within each cohort</text>
+        <text x="725" y="204">alias of the same process</text>
+        <text x="725" y="217">replicate = seed</text>
+        <text x="480" y="281">1 baseline + N seeds = N+1 keys</text>
+        <text x="480" y="345">one task per replicate — 101 tasks, not 101 × n datasets</text>
+        <text x="480" y="415">sha256 per ledger · all equal → proof · otherwise → leak</text>
+      </g>
+    </svg>
+    <figcaption>Structure from <code>workflows/harmonize.nf:20, 645-682, 704-706, 869-881</code>.
+    The permuted branch is dashed because it does not exist unless
+    <code>--permute_outcome_seed</code> is set; the baseline branch runs either way.</figcaption>
+  </figure>
+
+  <h3><span class="n">§6.1</span><span>Four structural choices, each load-bearing</span></h3>
+
+  <ol class="steps">
+    <li class="step">
+      <h3><span class="n">1</span><span>A shuffle, not a rewrite</span></h3>
+      <div class="slot" data-slot="what"><span class="lbl">What</span>
+        <p>The outcome column is permuted <em>within</em> each cohort, preserving its multiset
+        exactly. Type, cardinality, value set, and every quantile are unchanged; only the
+        row-level pairing between the outcome and every other column is destroyed
+        (<code>bin/permute_outcome.py:11-16</code>).</p></div>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>That pairing is precisely the signal an outcome-aware channel would be reading. A
+        ledger that moves under this shuffle moved because something read the joint distribution —
+        there is no other explanation left.</p></div>
+    </li>
+    <li class="step">
+      <h3><span class="n">2</span><span>An alias, not a second module</span></h3>
+      <div class="slot" data-slot="what"><span class="lbl">What</span>
+        <p><code>PROFILE_COLUMNS_PERMUTED</code> is a DSL2 alias of <code>PROFILE_COLUMNS</code>,
+        not a purpose-built test process (<code>harmonize.nf:20</code>).</p></div>
+      <div class="slot" data-slot="trap"><span class="lbl">Trap</span>
+        <p>A "profile for the test" module would be a code path the invariant was never actually
+        tested on. The alias exists only because DSL2 permits one invocation per process name and
+        the baseline still needs its own.</p></div>
+    </li>
+    <li class="step">
+      <h3><span class="n">3</span><span>The replicate id travels in the filename</span></h3>
+      <div class="slot" data-slot="what"><span class="lbl">What</span>
+        <p><code>PERMUTE_OUTCOME</code> emits <code>&lt;prefix&gt;.p&lt;seed&gt;.csv</code>; the
+        workflow reads the seed back off the name with a regex and fails loudly on a
+        non-matching file (<code>harmonize.nf:663-671</code>).</p></div>
+      <div class="slot" data-slot="why"><span class="lbl">Why</span>
+        <p>A process emits files, not structured records. The name is the only channel through
+        which a per-file attribute can cross that boundary.</p></div>
+    </li>
+    <li class="step">
+      <h3><span class="n">4</span><span>N replicates in one execution, not N executions</span></h3>
+      <div class="slot" data-slot="what"><span class="lbl">What</span>
+        <p>The loop runs inside a single Nextflow run as N branches, rather than as a shell loop
+        around N runs.</p></div>
+      <div class="slot" data-slot="done"><span class="lbl">Consequence</span>
+        <p>100 permutations cost one JVM startup instead of 100 — the difference between a test
+        that runs on every push and a test that moves to a nightly and then to nobody.</p></div>
+    </li>
+  </ol>
+
+  <h3><span class="n">§6.2</span><span>The verdict ladder</span></h3>
+
+  <p>Eight verdicts, evaluated in this order. Only the first two lines below are good news; the
+  point of the other six is that a failing run says <em>why</em>, not only <em>how much</em>
+  (<code>bin/invariant_report.py:172-187</code>).</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>#</th><th>Verdict</th><th>Fires when</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td><code>no-outcome-column</code></td><td>a cohort carries no column matching the pack's outcome variable — every permutation was a no-op</td></tr>
+      <tr><td class="num">2</td><td><code>marginal-moved</code></td><td>a permuted column's marginal changed; the shuffle did more than shuffle</td></tr>
+      <tr><td class="num">3</td><td><code>incomplete-permutation</code></td><td>a cohort is missing replicates other cohorts have</td></tr>
+      <tr><td class="num">4</td><td><code>no-op-permutation</code></td><td>every seed produced the identical ordering for some column</td></tr>
+      <tr><td class="num">5</td><td><code>no-ledger</code></td><td>a replicate produced no <code>ledger.proposed.yaml</code> to hash</td></tr>
+      <tr><td class="num">6</td><td><code>insufficient-permutations</code></td><td>fewer than <code>--invariant_n_permutations</code> ran</td></tr>
+      <tr><td class="num">7</td><td><code>proof</code></td><td>all of the above cleared <strong>and</strong> exactly one distinct ledger hash</td></tr>
+      <tr><td class="num">8</td><td><code>leak</code></td><td>more than one distinct hash</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note frozen">
+    <span class="lbl">Why the guards come before the count</span>
+    <p>Zero distinct hashes is not one distinct hash. If nothing was permuted, or nothing produced
+    a ledger, then <code>n_distinct_hashes == 1</code> follows trivially and would certify a
+    vacuous run as a proof. Each guard above exists to make one specific vacuity impossible to
+    mistake for evidence. There is no "mostly agree" — the verdict is <code>proof</code> or it is
+    not.</p>
+  </div>
+
+  <p>The report lands at <code>tests/invariant/report.json</code> —
+  <em>outside</em> <code>--outdir</code> on purpose (<code>conf/modules.config:123-134</code>): it
+  is a statement about the pipeline's code, not an output of any one run's data. Ledger hashes are
+  computed in Groovy straight off the channel rather than staged into the process, because all 100
+  ledgers share one filename by contract and staging them would force a rename that loses the only
+  thing the report needs them keyed by (<code>harmonize.nf:875</code>).</p>
+</section>
+
+<section id="s7">
+  <h2><span class="n">§7</span><span>Propose — three processes, one task per replicate each</span></h2>
+
+  <p class="lead">Propose is where a column becomes a candidate mapping and a candidate gets a
+  score. It is also the only stage the invariant claim is currently held over, which constrains
+  everything in it: it must be a pure function of the profiles, and its output must be
+  byte-stable.</p>
+
+  <h3><span class="n">§7.1</span><span>PROPOSE_CANDIDATES — recall, capped</span></h3>
+
+  <p>Cheap generators propose <code>(column → variable)</code> pairs; three are enabled by default
+  — <code>name_ngram</code>, <code>value_set</code>, <code>unit</code>. A column with zero
+  candidates is still emitted, with a null <code>concept_id</code>: silence and "nothing matched"
+  are different facts and the ledger distinguishes them.</p>
+
+  <div class="note safe">
+    <span class="lbl">The invariant, enforced structurally</span>
+    <p>Outcome-flagged variables are filtered out of the candidate variable set before a single
+    generator runs (<code>bin/propose_candidates.py:227</code>). Nothing downstream can propose a
+    mapping <em>to</em> the outcome, so nothing downstream can be a function of it. §7.2 then
+    re-asserts this at its own boundary rather than trusting the caller.</p>
+  </div>
+
+  <p><code>--max_candidates_per_column</code> (default <code>20</code>) is a recall ceiling on
+  <em>distinct variables</em> per column. Variables past the cut are not dropped in silence: they
+  are counted into <code>excluded_candidates</code> and carried into the ledger, so a reviewer can
+  see that a truncation happened (<code>bin/propose_candidates.py:135-154</code>).</p>
+
+  <h3><span class="n">§7.2</span><span>PROPOSE_CHANNELS — six independent opinions</span></h3>
+
+  <p>Each candidate is scored on six channels, weighted into one combined score. The weights are
+  the pipeline's clearest statement of what it believes evidence <em>is</em>: value overlap is
+  worth twice any other single channel.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Channel</th><th>Key</th><th>Default weight</th></tr></thead>
+    <tbody>
+      <tr><td><code>value_overlap</code></td><td><code>value</code></td><td class="num">0.30</td></tr>
+      <tr><td><code>name_similarity</code></td><td><code>name</code></td><td class="num">0.15</td></tr>
+      <tr><td><code>type_agreement</code></td><td><code>type</code></td><td class="num">0.15</td></tr>
+      <tr><td><code>distribution_distance</code></td><td><code>dist</code></td><td class="num">0.15</td></tr>
+      <tr><td><code>unit_plausibility</code></td><td><code>unit</code></td><td class="num">0.15</td></tr>
+      <tr><td><code>cardinality</code></td><td><code>card</code></td><td class="num">0.10</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Weights come from <code>--channel_weights</code>
+  (<code>nextflow.config:50</code>); which channels run at all comes from
+  <code>--enabled_channels</code> (<code>:51</code>). <code>unit_plausibility</code> tries the
+  conversions listed in <code>--unit_factor_candidates</code> — <code>[1, 30.4375, 365.25, 0.001,
+  1000]</code>, i.e. identity, days-per-month, days-per-year, and the two metric decades
+  (<code>:52</code>).</p>
+
+  <p>With <code>--emit_confirmation_plots</code> on (the default), the stage also writes one SVG
+  per candidate: <em>the one plot that would kill this proposal</em>. That framing is deliberate —
+  a plot chosen to confirm is decoration; a plot chosen to falsify is evidence a reviewer can act
+  on in seconds.</p>
+
+  <h3><span class="n">§7.3</span><span>PROPOSE_LEDGER — ordered so it can be hashed</span></h3>
+
+  <p>Proposals are sorted by descending combined score, ties broken by variable name
+  (<code>bin/propose_ledger.py:144</code>); the top <code>--ledger_top_k</code> (default
+  <code>5</code>) are written per column and the rest are counted, not listed
+  (<code>:155</code>). Floats are rounded to <code>--ledger_float_precision</code> (default
+  <code>4</code>) so a float's last bit cannot change the file's hash
+  (<code>:79</code>), and YAML is dumped with <code>sort_keys=False</code> over an explicitly
+  ordered structure, so key order is a property of the code rather than of the serialiser
+  (<code>:179-184</code>).</p>
+
+  <div class="note frozen">
+    <span class="lbl">Why all this determinism theatre</span>
+    <p>The invariant test is <code>sha256(ledger.proposed.yaml)</code> compared across 100 runs.
+    Any nondeterminism anywhere in propose — dict ordering, float noise, an unstable sort — would
+    produce differing hashes and be reported as <code>leak</code>. The rounding and the fixed key
+    order exist so that a <code>leak</code> verdict means what it says.</p>
+  </div>
+</section>
+
+<section id="s8">
+  <h2><span class="n">§8</span><span>Confirm &amp; compile — the gate that cannot be automated away</span></h2>
+
+  <p class="lead">The pipeline will not map anything on its own recognisance. Between a proposal
+  and a rule sits a file a human wrote.</p>
+
+  <div class="note stop">
+    <span class="lbl">Refusal 9 — no confirmed ledger</span>
+    <p><code>--confirmed_ledger</code> defaults to <code>null</code> in
+    <strong>every</strong> profile, <code>-profile test</code> included
+    (<code>nextflow.config:66</code>). There is no <code>auto_confirm</code> flag, no score
+    threshold, and nothing else anywhere in the CLI that can supply a decision. The only thing
+    that makes this gate open is a real file on disk.</p>
+  </div>
+
+  <p>The refusal is a <code>.subscribe</code> on the baseline ledger channel, not an eager
+  <code>error()</code> (<code>harmonize.nf:804-814</code>). DSL2 executes the whole workflow
+  script top-to-bottom to <em>build</em> the graph before any task is scheduled, so an eager
+  refusal fired before <code>PROPOSE_LEDGER</code> had run — and pointed the user at a
+  <code>ledger.proposed.yaml</code> that had never been written. Subscribing means propose
+  genuinely completes, the file exists, and the error message names a path that is really there.</p>
+
+  <h3><span class="n">§8.1</span><span>What a confirmed row must carry</span></h3>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>Decision</th><th>Meaning</th><th>Compiles to a rule?</th></tr></thead>
+    <tbody>
+      <tr><td><code>accept</code></td><td>the top proposal is correct</td><td>yes — and requires a <code>rationale</code></td></tr>
+      <tr><td><code>remap</code></td><td>a different variable is correct</td><td>yes — requires an explicit <code>variable</code></td></tr>
+      <tr><td><code>reject</code></td><td>this column maps to nothing</td><td>no — recorded in the audit trail</td></tr>
+      <tr><td><code>defer</code></td><td>undecided</td><td>no — recorded in the audit trail</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p><code>decisions.json</code> carries <em>every</em> row, including rejects and defers — it is
+  an audit trail, not a filtered work list (<code>bin/confirm_ledger.py:20-25</code>). Only
+  <code>accept</code> and <code>remap</code> are actionable (<code>:59</code>).</p>
+
+  <div class="note stop">
+    <span class="lbl">Refusals 10–11 — stale, or unreasoned</span>
+    <p>Each row carries <code>proposed_hash</code>; a mismatch against the current
+    <code>ledger.proposed.yaml</code> aborts with the diff, unless
+    <code>--allow_stale_ledger</code> is set — in which case it proceeds with a loud warning naming
+    every stale row (<code>bin/confirm_ledger.py:113-158</code>). Separately, with
+    <code>--require_rationale</code> on (the default), an <code>accept</code> with an empty
+    rationale is rejected at parse time (<code>:117</code>).</p>
+  </div>
+
+  <h3><span class="n">§8.2</span><span>COMPILE_RULES — an id that survives a version bump</span></h3>
+
+  <pre><code>rule_id = rule_id_prefix + sha256(canonical_json({kind, from, to, params}))</code></pre>
+
+  <p>The digest covers exactly those four fields (<code>bin/compile_rules.py:90-92</code>) —
+  notably <em>not</em> <code>rule_version</code>, which is the pack's own version copied in from
+  the pack YAML (<code>harmonize.nf:831</code>). A pack bump therefore changes every rule's
+  <code>rule_version</code> and moves not one character of any <code>rule_id</code>, which is what
+  makes a rerun after a pack bump diffable rather than mysterious.</p>
+
+  <div class="note stop">
+    <span class="lbl">Refusal (compile) — two rules, one target cell</span>
+    <p>Two different source columns compiling to the same <code>(cohort, dataset, variable)</code>
+    is a defect, not a merge. With <code>--fail_on_rule_collision</code> on (the default), the run
+    aborts naming both columns (<code>bin/compile_rules.py:137-144</code>). Silently picking one
+    would make the output depend on rule ordering.</p>
+  </div>
+
+  <p>In this phase every compiled rule has <code>kind: "column_map"</code>
+  (<code>bin/compile_rules.py:84</code>). The other three kinds the contract names —
+  <code>value_map</code>, <code>unit_convert</code>, <code>derive</code> — belong to stages that do
+  not exist yet.</p>
+</section>
+
+<section id="s9">
+  <h2><span class="n">§9</span><span>Every pipeline parameter, and its default</span></h2>
+
+  <p class="lead">Thirty parameters specific to this pipeline, read verbatim from
+  <code>nextflow.config:13-78</code>. Boilerplate nf-core options
+  (<code>--outdir</code>, <code>--email</code>, iGenomes, MultiQC) are omitted.</p>
+
+  <h4>Input</h4>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it governs</th></tr></thead>
+    <tbody>
+      <tr><td><code>--input</code></td><td><code>null</code></td><td>the two-level samplesheet; required</td></tr>
+      <tr><td><code>--concept_pack</code></td><td><code>assets/packs/minimal.yaml</code></td><td>the target variable set</td></tr>
+      <tr><td><code>--stop_after</code></td><td><code>null</code></td><td>halt after a stage; <code>null</code> means run to the end of what is built</td></tr>
+      <tr><td><code>--allow_single_dataset</code></td><td><code>false</code></td><td>permits a one-dataset cohort (for §3 linkage, not yet built)</td></tr>
+      <tr><td><code>--unseal</code></td><td><code>''</code></td><td>comma-separated dataset ids to admit despite <code>holdout: true</code></td></tr>
+      <tr><td><code>--locked_model</code></td><td><code>locked_model.json</code></td><td>the lock <code>--unseal</code> is hash-matched against</td></tr>
+      <tr><td><code>--unseal_log</code></td><td><code>unseal.log</code></td><td>append-only audit trail of admitted holdouts</td></tr>
+      <tr><td><code>--params_hash_file</code></td><td><code>results/params_hash.txt</code></td><td>where this run's identity hash is recorded</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>Profiling — §2</h4>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it governs</th></tr></thead>
+    <tbody>
+      <tr><td><code>--max_unique_listed</code></td><td class="num">500</td><td>cap on the stored unique-value set per column</td></tr>
+      <tr><td><code>--date_formats</code></td><td><code>['%Y-%m-%d', '%Y-%m', '%Y']</code></td><td>what parses as a date</td></tr>
+      <tr><td><code>--example_k</code></td><td class="num">5</td><td>example values carried into the ledger, in row order</td></tr>
+      <tr><td><code>--na_strings</code></td><td><code>['', 'NA', 'NULL', '.']</code></td><td>what counts as missing</td></tr>
+      <tr><td><code>--unit_header_patterns</code></td><td><code>assets/unit_patterns.yaml</code></td><td>header regexes that imply a UCUM unit</td></tr>
+      <tr><td><code>--ucum_release</code></td><td><code>'2.2'</code></td><td>pinned UCUM grammar version — recorded only, never resolved</td></tr>
+      <tr><td><code>--infer_unit_from_range</code></td><td><code>true</code></td><td>adds a confidence-0.3 unit candidate from the value range</td></tr>
+      <tr><td><code>--max_failed_frac</code></td><td class="num">0.05</td><td>run-level failure rate above which the run refuses</td></tr>
+      <tr><td><code>--fail_sample_k</code></td><td class="num">3</td><td>offending values carried into the failure manifest</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>Invariant harness — §10.1</h4>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it governs</th></tr></thead>
+    <tbody>
+      <tr><td><code>--permute_outcome_seed</code></td><td><code>null</code></td><td>int or range (<code>7</code>, <code>1..100</code>); unset means a normal run permutes nothing</td></tr>
+      <tr><td><code>--invariant_n_permutations</code></td><td class="num">100</td><td>permutations required before a run counts as a proof</td></tr>
+      <tr><td><code>--invariant_scope</code></td><td><code>'propose'</code></td><td>the stage the claim is held over; any other value is refused, not honoured</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>Propose — §4</h4>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it governs</th></tr></thead>
+    <tbody>
+      <tr><td><code>--max_candidates_per_column</code></td><td class="num">20</td><td>recall ceiling on distinct variables proposed per column</td></tr>
+      <tr><td><code>--candidate_generators</code></td><td><code>['name_ngram', 'value_set', 'unit']</code></td><td>which generators propose at all</td></tr>
+      <tr><td><code>--channel_weights</code></td><td><code>[name:0.15, type:0.15, card:0.1, value:0.3, dist:0.15, unit:0.15]</code></td><td>per-channel weight in the combined score</td></tr>
+      <tr><td><code>--enabled_channels</code></td><td>all six</td><td>which evidence channels score at all</td></tr>
+      <tr><td><code>--unit_factor_candidates</code></td><td><code>[1, 30.4375, 365.25, 0.001, 1000]</code></td><td>conversions <code>unit_plausibility</code> will try</td></tr>
+      <tr><td><code>--emit_confirmation_plots</code></td><td><code>true</code></td><td>emit the one SVG per candidate that would falsify it</td></tr>
+      <tr><td><code>--ledger_top_k</code></td><td class="num">5</td><td>proposals written per column; the rest are counted, not listed</td></tr>
+      <tr><td><code>--ledger_float_precision</code></td><td class="num">4</td><td>rounding, so a float's last bit cannot change the ledger's hash</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>Confirm and compile — §5</h4>
+  <div class="tw">
+  <table>
+    <thead><tr><th>Parameter</th><th>Default</th><th>What it governs</th></tr></thead>
+    <tbody>
+      <tr><td><code>--confirmed_ledger</code></td><td><code>null</code></td><td>the human gate; <code>null</code> stops the run after propose</td></tr>
+      <tr><td><code>--require_rationale</code></td><td><code>true</code></td><td>an <code>accept</code> with no rationale is rejected at parse time</td></tr>
+      <tr><td><code>--allow_stale_ledger</code></td><td><code>false</code></td><td>escape hatch for a stale <code>proposed_hash</code>, logged loudly</td></tr>
+      <tr><td><code>--rule_id_prefix</code></td><td><code>'R-'</code></td><td>cosmetic; every bit of id stability comes from the content hash</td></tr>
+      <tr><td><code>--fail_on_rule_collision</code></td><td><code>true</code></td><td>two rules writing one target cell is a defect, not a merge</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <div class="note frozen">
+    <span class="lbl">Configured but not yet consumed</span>
+    <p><code>--generality_terms</code> (<code>assets/forbidden_terms.txt</code>) and
+    <code>--generality_paths</code> (<code>['modules/', 'workflows/', 'subworkflows/',
+    'bin/']</code>) belong to the §10.3 generality audit, which is not built. They are set now so
+    that the audit, once written, does not inherit a default authored before those directories
+    existed (<code>nextflow.config:74-78</code>).</p>
+  </div>
+</section>
+
+<section id="s10">
+  <h2><span class="n">§10</span><span>Every decision point — the eleven places a run stops</span></h2>
+
+  <p class="lead">This is the table the source code makes you assemble by hand: the refusals are
+  scattered across a workflow, a subworkflow, and four Python scripts. Collected, they are the
+  clearest single statement of what the pipeline considers a defect rather than a datum.</p>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>#</th><th>Stops when</th><th>Overridable by</th><th>Where</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td><code>--stop_after</code> names an unbuilt stage</td><td>nothing (except the scoped harness exemption)</td><td><code>harmonize.nf:56-60</code></td></tr>
+      <tr><td class="num">2</td><td>duplicate <code>(cohort_id, dataset_id)</code> in the sheet</td><td>nothing</td><td><code>ingest/main.nf:31-47</code></td></tr>
+      <tr><td class="num">3</td><td>concept pack malformed, or flags no <code>outcome</code></td><td>nothing</td><td><code>ingest/main.nf:64-113</code></td></tr>
+      <tr><td class="num">4</td><td><code>--unseal</code> set but no <code>locked_model.json</code></td><td>nothing</td><td><code>harmonize.nf:154-156</code></td></tr>
+      <tr><td class="num">5</td><td>the lock does not <code>cover</code> a requested id</td><td>nothing</td><td><code>harmonize.nf:168-170</code></td></tr>
+      <tr><td class="num">6</td><td>the lock's <code>params_hash</code> differs from this run's</td><td>nothing</td><td><code>harmonize.nf:172-174</code></td></tr>
+      <tr><td class="num">7</td><td>the lock's <code>analysis_git_sha</code> differs from <code>HEAD</code></td><td>nothing</td><td><code>harmonize.nf:175-177</code></td></tr>
+      <tr><td class="num">8</td><td>run-level profiling failure rate exceeds the threshold</td><td><code>--max_failed_frac</code></td><td><code>manifest_profiling_failures.py:47-52</code></td></tr>
+      <tr><td class="num">9</td><td>no <code>--confirmed_ledger</code>, after propose completes</td><td>nothing — only a human-authored file</td><td><code>harmonize.nf:804-814</code></td></tr>
+      <tr><td class="num">10</td><td>the confirmed ledger is stale against the proposed one</td><td><code>--allow_stale_ledger</code> (warns loudly)</td><td><code>confirm_ledger.py:113-158</code></td></tr>
+      <tr><td class="num">11</td><td>two rules compile to the same target cell</td><td><code>--fail_on_rule_collision false</code></td><td><code>compile_rules.py:137-144</code></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>Three further refusals guard the harness itself rather than the data: an
+  <code>--invariant_scope</code> other than <code>propose</code> is refused as a design change
+  needing a superseding ADR rather than honoured as a config edit
+  (<code>harmonize.nf:570-572</code>); a <code>--permute_outcome_seed</code> on a run that stops
+  before <code>profile</code> is refused because the permutation could not affect anything
+  (<code>:567-569</code>); and a malformed seed spec is refused by the pipeline's single parser
+  for <em>"int or range"</em> (<code>parseSeedSpec</code>).</p>
+
+  <div class="note safe">
+    <span class="lbl">The pattern worth naming</span>
+    <p>Eight of the eleven have <strong>no override at all</strong>. Of the three that do, two are
+    numeric thresholds and the third shouts. There is no global <code>--force</code>, and — the
+    load-bearing case — no flag anywhere that can satisfy refusal 9. A pipeline whose gates all
+    have escape hatches has no gates.</p>
+  </div>
+</section>
+
+<section id="s11">
+  <h2><span class="n">§11</span><span>Outputs — what a completed run leaves behind</span></h2>
+
+  <p class="lead">Published paths are set per-process in <code>conf/modules.config</code>. The
+  default rule sends a process's files to <code>&lt;outdir&gt;/&lt;first underscore-token,
+  lowercased&gt;</code>; five processes override it and three publish nothing at all.</p>
+
+  <div class="tree">results/                      <span class="cm">← --outdir (default: results)</span>
+├── <span class="d">params_hash.txt</span>           <span class="cm">this run's identity; written before any stage runs</span>
+├── <span class="d">ingest/</span>
+│   └── ingest_manifest.json  <span class="cm">one line per ADMITTED dataset — the seal, visible</span>
+├── <span class="d">profiles/</span>
+│   ├── &lt;cohort&gt;.&lt;dataset&gt;.json
+│   └── _failed.json          <span class="cm">collated; per-dataset failure files stay unpublished</span>
+├── <span class="d">propose/</span>
+│   ├── candidates.parquet    <span class="cm">baseline replicate only</span>
+│   ├── evidence.parquet      <span class="cm">baseline replicate only</span>
+│   └── confirmation_plots/   <span class="cm">one falsifying SVG per candidate</span>
+├── <span class="d">ledger.proposed.yaml</span>      <span class="cm">at the outdir ROOT, not under propose/ — Ruling R13</span>
+├── <span class="d">confirm/</span>
+│   └── decisions.json        <span class="cm">every row, including reject and defer</span>
+├── <span class="d">rules/</span>
+│   └── ruleset.json          <span class="cm">kind is always column_map in phase 0</span>
+└── <span class="d">pipeline_info/</span>          <span class="cm">nf-core execution trace, timeline, params</span>
+
+tests/invariant/              <span class="cm">← NOT under --outdir, on purpose</span>
+└── report.json               <span class="cm">a statement about the CODE, not about this run's data</span>
+
+<span class="cm">never published:</span>
+  permuted tables            <span class="cm">100 replicates × n datasets would bury results/</span>
+  permuted profiles          <span class="cm">would collide with the baseline they are named after</span>
+  candidates/evidence/ledger.p&lt;seed&gt;.*   <span class="cm">§10.1 scaffolding, hashed in Groovy</span>
+  versions.yml               <span class="cm">suppressed by every saveAs</span></div>
+
+  <p>The two placements worth understanding: <code>ledger.proposed.yaml</code> sits at the outdir
+  root because that is the literal path a run's own acceptance test <code>sha256sum</code>s
+  (<code>conf/modules.config:90-107</code>), and <code>tests/invariant/report.json</code> sits
+  outside <code>--outdir</code> because every consumer named in its contract — CI, the nf-test —
+  looks for it at that fixed path (<code>:123-134</code>).</p>
+
+  <h3><span class="n">§11.1</span><span>Execution environment</span></h3>
+
+  <p>All nine Python-backed processes run one digest-tagged image,
+  <code>docker.io/bolt3x/clinarmonize-duckdb:1.5.5_pyyaml6.0.2</code>; only
+  <code>STAGE_OPEN_DATASET</code> differs, on a digest-pinned
+  <code>ubuntu</code> (<code>harmonize.nf:429</code>). One image across the whole run is one less
+  thing whose version can drift between the baseline and a permuted replicate — which would show
+  up as a <code>leak</code> that is really a packaging bug.</p>
+</section>
+
+<section id="s12">
+  <h2><span class="n">§12</span><span>What this schematic does not cover</span></h2>
+
+  <p class="lead">A schematic that states no limits reads as a claim of completeness. These are
+  the real ones.</p>
+
+  <ul>
+    <li><strong>Five of the nine stages do not exist.</strong> <code>link</code>,
+    <code>map</code>, <code>derive</code>, <code>coverage</code>, and <code>emit</code> are
+    declared and gated, not implemented. Nothing in this document describes how a value is
+    actually written into an OMOP table, because nothing does that yet.</li>
+
+    <li><strong>The invariant claim covers <code>propose</code> only.</strong> ADR-003 scopes the
+    harness to the proposer; the pipeline refuses any other <code>--invariant_scope</code> rather
+    than honouring it. A <code>proof</code> verdict says <em>the proposal ledger</em> is
+    outcome-blind. It says nothing about the four unbuilt stages downstream, where value mapping
+    and endpoint derivation — both far easier places to leak — will live.</li>
+
+    <li><strong>Provenance is designed, not built.</strong> The plan's second contract — every
+    emitted cell resolving to <code>(cohort_id, dataset_id, source_column, source_value, rule_id,
+    rule_version)</code> in a joinable <code>provenance.parquet</code> — has no implementing code
+    in the tree. <code>rule_id</code> and <code>rule_version</code> exist; the table they would
+    join into does not.</li>
+
+    <li><strong><code>vocabulary</code> is recorded, never resolved.</strong> The pack's pinned
+    release string is read and written into <code>versions.yml</code>. There is no ATHENA download
+    and no vocabulary lookup anywhere in the pipeline, so <code>concept_id</code> values are
+    carried through as the pack supplies them — in the default pack, all zeros.</li>
+
+    <li><strong>Only <code>kind: column_map</code> compiles.</strong> The three other rule kinds
+    the contract names are unreachable, so a confirmed decision that logically implies a unit
+    conversion currently compiles to a plain column mapping.</li>
+
+    <li><strong>Single-machine assumptions are untested here.</strong> This document says nothing
+    about executor profiles, resource labels beyond <code>process_single</code>, or how the harness
+    behaves at 100 replicates on a scheduler rather than locally.</li>
+  </ul>
+
+  <div class="note stop">
+    <span class="lbl">The honest summary</span>
+    <p>What exists today is a rigorously gated <em>front half</em>: read the data, describe it,
+    propose mappings, prove the proposals did not peek at the outcome, and stop dead until a human
+    signs off. The back half — the part that actually writes OMOP tables — is specified in
+    <a href="p-harmonize.html">the plan</a> and absent from the code.</p>
+  </div>
+</section>
+
+<footer>
+  <p><strong>clinarmonize general pipeline schematic</strong> · rev 2026-08-17 ·
+  <code>docs/schematics/pipeline-schematic.html</code> · describes the working tree at commit
+  <code>d5b1cd1</code>. Every parameter default, path, and line reference in this document was read
+  from a file in the repository rather than from the design plan; where the two disagree, the code
+  is what is described here. Companion document: <a href="p-harmonize.html">p-harmonize.html</a>,
+  the design plan and its rulings.</p>
+</footer>
+
+</main>
+</div>
+</div>

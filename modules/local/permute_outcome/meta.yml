@@ -1,0 +1,65 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: permute_outcome
+description: Permute the pack's outcome variable within each cohort, preserving its marginal (section
+  10.1)
+keywords:
+  - permutation
+  - invariant
+  - negative-control
+tools:
+  - python:
+      description: Interpreter running this module's script from bin/.
+      homepage: https://www.python.org
+      documentation: https://docs.python.org/3/
+      licence:
+        - PSF-2.0
+      identifier: ""
+input:
+  - - meta:
+        type: map
+        description: Groovy Map identifying the unit of work, e.g. [ cohort_id:'COHORT_A', dataset_id:'person'
+          ]
+    - table:
+        type: file
+        description: One staged cohort table
+        pattern: "*.csv"
+        ontologies: []
+  - - pack:
+        type: file
+        description: The variable pack, read for its outcome flag
+        pattern: "*.yaml"
+        ontologies: []
+  - - seeds:
+        type: list
+        description: Resolved replicate seeds, already parsed by the workflow
+output:
+  tables:
+    - - meta:
+          type: map
+          description: Groovy Map identifying the unit of work, e.g. [ cohort_id:'COHORT_A', dataset_id:'person'
+            ]
+      - "*.p*.csv":
+          type: file
+          description: One permuted table per replicate; the seed is encoded in the filename
+          pattern: "*.p*.csv"
+          ontologies: []
+  manifest:
+    - - "*.permutation.json":
+          type: file
+          description: Per-replicate record of what was permuted and under which seed
+          pattern: "*.permutation.json"
+          ontologies: []
+  versions:
+    - - ${task.process}:
+          type: string
+          description: The process the versions were collected from
+      - versions.yml:
+          type: file
+          description: File containing software versions
+          pattern: versions.yml
+          ontologies: []
+authors:
+  - "@bolt3x"
+maintainers:
+  - "@bolt3x"

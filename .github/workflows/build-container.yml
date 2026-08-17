@@ -1,0 +1,133 @@
+name: Build container
+# Builds containers/duckdb-pyyaml and pushes it to Docker Hub.
+#
+# This exists because the previous image was a Wave *ephemeral* build: with
+# `wave.freeze = true` and no `wave.build.repository`, the frozen image lived
+# only in Wave's own store under /wt/<token>/ and its token stopped resolving
+# within four days, taking every containerised test with it. Building here
+# means the image is reproducible from a committed recipe on a registry we
+# control, rather than existing only in one laptop's Docker cache.
+#
+# Runs on GitHub's native x86_64 runners: the pipeline targets an x86_64 HPC
+# cluster, and building amd64 under emulation is slow and, on some hosts,
+# simply hangs.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "containers/duckdb-pyyaml/**"
+      - ".github/workflows/build-container.yml"
+  pull_request:
+    paths:
+      - "containers/duckdb-pyyaml/**"
+      - ".github/workflows/build-container.yml"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish"
+        required: false
+        default: "1.5.5_pyyaml6.0.2"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: docker.io/bolt3x/clinarmonize-duckdb
+  # Single-platform on purpose. The modules pin ONE digest, and the cluster is
+  # x86_64; a single-platform digest is unambiguous for Apptainer, which has
+  # already proven fussy about OCI reference forms on this pipeline. To also
+  # publish arm64 for local development, add ",linux/arm64" here -- the pin
+  # keeps working, because Apptainer resolves a manifest list by platform.
+  PLATFORMS: linux/amd64
+
+permissions:
+  contents: read
+
+jobs:
+  spec-drift:
+    # Cheap, and it guards the thing most likely to rot: the per-module
+    # environment.yml copies are what `-profile conda` installs, while the
+    # canonical one is what the image is built from. If they diverge, conda
+    # runs and singularity run DIFFERENT software and nothing reports it.
+    name: conda spec drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Every module copy must match the canonical spec
+        run: |
+          canon=containers/duckdb-pyyaml/environment.yml
+          rc=0
+          for e in modules/local/*/environment.yml; do
+            if ! cmp -s "$canon" "$e"; then
+              echo "::error file=$e::differs from $canon"
+              diff -u "$canon" "$e" || true
+              rc=1
+            fi
+          done
+          [ "$rc" = 0 ] && echo "OK: all module copies match $canon"
+          exit $rc
+
+  build:
+    name: build and push
+    needs: spec-drift
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+
+      # Pull requests build but never publish: a fork PR must not be able to
+      # push to the registry, and the secret is not available to it anyway.
+      - name: Log in to Docker Hub
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build${{ github.event_name != 'pull_request' && ' and push' || ' (no push)' }}
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: containers/duckdb-pyyaml
+          platforms: ${{ env.PLATFORMS }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ env.IMAGE }}:${{ github.event.inputs.tag || '1.5.5_pyyaml6.0.2' }}
+          # Attestations matter more than usual here: this pipeline's claims
+          # rest on being able to say what produced a given artifact.
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The Dockerfile already asserts duckdb/pyyaml versions and `ps` at build
+      # time, so reaching this step means the image is functional. What is
+      # verified here is the thing the Dockerfile cannot check: that what
+      # landed in the registry is addressable by an immutable digest.
+      - name: Report the digest to pin
+        if: github.event_name != 'pull_request'
+        run: |
+          digest='${{ steps.build.outputs.digest }}'
+          case "$digest" in
+            sha256:*) ;;
+            *) echo "::error::no digest returned by the build"; exit 1 ;;
+          esac
+          {
+            echo "### Image published"
+            echo
+            echo '```'
+            echo "${IMAGE}@${digest}"
+            echo '```'
+            echo
+            echo "Pin the modules to it:"
+            echo
+            echo '```bash'
+            echo "./tools/pin_container.sh ${IMAGE}:${{ github.event.inputs.tag || '1.5.5_pyyaml6.0.2' }}"
+            echo '```'
+            echo
+            echo "> Pin by digest only. \`repo:tag@sha256:...\` is legal OCI but"
+            echo "> \`singularity pull\` refuses it outright."
+          } >> "$GITHUB_STEP_SUMMARY"

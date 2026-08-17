@@ -24,3 +24,10 @@ tests/invariant/
 # tests/invariant_leak_control.nf.test's disposable sabotage sandbox --
 # never committed, deleted by the test's own cleanup{}.
 .leak_control_copy/
+
+# Verification runs from tools/verify_clinarmonize.sh. Per-run evidence, not
+# source: the tarball bundles an overlay venv (~24MB) and the logs carry
+# absolute cluster paths and usernames. Attach these to an issue if they are
+# needed for review; never commit them.
+verification-*/
+clinarmonize-verification-*.tar.gz

@@ -1,0 +1,64 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: propose_ledger
+description: Reduce weighted channel evidence to the deterministic proposal ledger (section 4.3)
+keywords:
+  - ledger
+  - proposal
+  - deterministic
+tools:
+  - python:
+      description: Interpreter running this module's script from bin/.
+      homepage: https://www.python.org
+      documentation: https://docs.python.org/3/
+      licence:
+        - PSF-2.0
+      identifier: ""
+  - duckdb:
+      description: In-process analytical database. Used for Parquet I/O and to pin quantile interpolation
+        to a single engine so ledger hashes stay stable.
+      homepage: https://duckdb.org
+      documentation: https://duckdb.org/docs/
+      licence:
+        - MIT
+      identifier: ""
+input:
+  - - replicate:
+        type: string
+        description: Replicate identifier, e.g. 'observed' or a permutation seed
+    - candidates_parquet:
+        type: file
+        description: Candidates from PROPOSE_CANDIDATES
+        pattern: "*.parquet"
+        ontologies: []
+    - evidence_parquet:
+        type: file
+        description: Channel evidence from PROPOSE_CHANNELS
+        pattern: "*.parquet"
+        ontologies: []
+  - - ledger_params_json:
+        type: string
+        description: "JSON-encoded ledger parameters: top-k, float precision and exclusions"
+output:
+  ledger:
+    - - replicate:
+          type: string
+          description: Replicate identifier, e.g. 'observed' or a permutation seed
+      - "*.yaml":
+          type: file
+          description: The proposal ledger, sorted and rounded with R15 exclusions applied
+          pattern: "*.yaml"
+          ontologies: []
+  versions:
+    - - ${task.process}:
+          type: string
+          description: The process the versions were collected from
+      - versions.yml:
+          type: file
+          description: File containing software versions
+          pattern: versions.yml
+          ontologies: []
+authors:
+  - "@bolt3x"
+maintainers:
+  - "@bolt3x"

@@ -1,0 +1,51 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: manifest_profiling_failures
+description: Collect per-column profiling failures into one manifest and enforce the failure-rate ceiling
+  (section 2.4)
+keywords:
+  - profiling
+  - qc
+  - manifest
+tools:
+  - python:
+      description: Interpreter running this module's script from bin/.
+      homepage: https://www.python.org
+      documentation: https://docs.python.org/3/
+      licence:
+        - PSF-2.0
+      identifier: ""
+input:
+  - - profile_jsons:
+        type: file
+        description: Per-column profiles from PROFILE_COLUMNS
+        pattern: "*.json"
+        ontologies: []
+  - - failed_jsons:
+        type: file
+        description: Per-column failure records from PROFILE_COLUMNS
+        pattern: "*.failed.json"
+        ontologies: []
+  - - max_failed_frac:
+        type: float
+        description: Maximum tolerated fraction of failed columns before the run aborts
+output:
+  manifest:
+    - - _failed.json:
+          type: file
+          description: Every failed column with its raw sample and reason
+          pattern: _failed.json
+          ontologies: []
+  versions:
+    - - ${task.process}:
+          type: string
+          description: The process the versions were collected from
+      - versions.yml:
+          type: file
+          description: File containing software versions
+          pattern: versions.yml
+          ontologies: []
+authors:
+  - "@bolt3x"
+maintainers:
+  - "@bolt3x"

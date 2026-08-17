@@ -1,0 +1,51 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: confirm_ledger
+description: Parse a human-confirmed ledger against the proposal and emit machine-readable decisions (section
+  5.1)
+keywords:
+  - confirmation
+  - human-in-the-loop
+  - gate
+tools:
+  - python:
+      description: Interpreter running this module's script from bin/.
+      homepage: https://www.python.org
+      documentation: https://docs.python.org/3/
+      licence:
+        - PSF-2.0
+      identifier: ""
+input:
+  - - confirmed_ledger_file:
+        type: file
+        description: The human-edited confirmed ledger
+        pattern: "*.yaml"
+        ontologies: []
+  - - proposed_ledger_file:
+        type: file
+        description: The ledger this confirmation must match by proposed_hash
+        pattern: "*.yaml"
+        ontologies: []
+  - - confirm_params_json:
+        type: string
+        description: "JSON-encoded confirmation parameters: rationale requirement and staleness policy"
+output:
+  decisions:
+    - - decisions.json:
+          type: file
+          description: One decision per confirmed row, matched by key rather than by position
+          pattern: decisions.json
+          ontologies: []
+  versions:
+    - - ${task.process}:
+          type: string
+          description: The process the versions were collected from
+      - versions.yml:
+          type: file
+          description: File containing software versions
+          pattern: versions.yml
+          ontologies: []
+authors:
+  - "@bolt3x"
+maintainers:
+  - "@bolt3x"
