@@ -1,0 +1,28 @@
+# assets/blocking_rules_fixture.yaml — the blocking rules for §10.2's
+# fixtures, pointed at by conf/test.config and conf/test_full.config.
+#
+# assets/blocking_rules.yaml carries the DEFAULT rule list (birth_date/sex,
+# a name prefix, an MRN) -- the identifiers a real registry linkage runs on.
+# Neither §10.2 fixture carries any of them: Eunomia is native OMOP with
+# surrogate keys, and MIMIC-IV demo is de-identified, so there is no name,
+# no date of birth and no MRN anywhere in either. Running the default rules
+# against them yields three rules with zero pairs and every record
+# unblocked, which is a CORRECT report and a useless test.
+#
+# These rules are what the fixtures actually support. They are still
+# generic (§10.3): a surrogate person key, and a demographic pair. No
+# disease term, gene symbol or cohort name appears here.
+#
+# Note what br_person_key does and does not prove. It blocks on the source
+# system's own person identifier, so it is the easy case -- exactly what a
+# real linkage does NOT have, which is why it is not the only rule here.
+# br_demog_year blocks on a low-cardinality demographic pair, produces
+# genuinely large blocks, and is what exercises max_block_size.
+- id: br_person_key
+  on: [subject_id]
+- id: br_demog_year
+  on: [gender, anchor_year]
+- id: br_omop_person
+  on: [PERSON_ID]
+- id: br_omop_birth
+  on: [YEAR_OF_BIRTH, GENDER_SOURCE_VALUE]

@@ -1,0 +1,283 @@
+nextflow_pipeline {
+
+    name "§3 link — blocking, Fellegi–Sunter scoring, thresholding"
+    script "../main.nf"
+    tag "link"
+
+    //
+    // §10.2's contract names this file for "§3.2 three-way agreement", and
+    // that is the assertion the first test makes. The rest of §3's
+    // done-when clauses are here too rather than in three files, because
+    // they are three claims about ONE run: blocking's report, scoring's
+    // weights and thresholding's histogram all come out of the same
+    // execution, and splitting them would re-run the whole stage three
+    // times to assert on three of its outputs.
+    //
+    // The fixture is purpose-built (tests/fixtures/make_fixtures.py,
+    // link_fixture_tables) and not MIMIC-IV demo. §3.2's done-when needs two
+    // pairs that differ in EXACTLY ONE comparison level -- missing versus
+    // disagreeing -- and no real dataset offers that on demand. MIMIC-IV
+    // demo exercises the same code messily under -profile test_full; this
+    // exercises it precisely.
+    //
+
+    test("a missing field scores above a disagreeing one — the three-way handling is observable in the weight (§3.2 done-when)") {
+
+        when {
+            params {
+                outdir               = "$outputDir"
+                input                = "${projectDir}/test_data/fixtures/link_samplesheet.csv"
+                concept_pack         = "${projectDir}/assets/packs/minimal.yaml"
+                blocking_rules       = "${projectDir}/test_data/fixtures/link_blocking_rules.yaml"
+                link_comparison_spec = "${projectDir}/test_data/fixtures/link_comparisons.yaml"
+                stop_after           = "link"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def report = new groovy.json.JsonSlurper().parse(file("${params.outdir}/link/link_report.json"))
+            def model  = new groovy.json.JsonSlurper().parse(file("${params.outdir}/link/model.json"))
+
+            // REC001 agrees on given/family/birth_date and its `middle` is
+            // MISSING on the encounter side. REC002 agrees on the same three
+            // and DISAGREES on `middle`. Every other comparison the two
+            // pairs make is identical by construction, so the ONLY thing
+            // separating their weights is the level `middle` resolves to.
+            // scores.parquet carries a nested per_field_agreement column, so
+            // it is read with the same duckdb that wrote it
+            // (tests/fixtures/read_scores.py) rather than reimplemented in
+            // Groovy -- a second implementation could agree with a bug. It
+            // doubles as the round-trip check for the nested type: if the
+            // LIST(STRUCT) did not survive the write, `levels` comes back
+            // empty and the assertions below fail rather than pass vacuously.
+            def reader = ['python3',
+                          "${projectDir}/tests/fixtures/read_scores.py",
+                          "${params.outdir}/link/scores.parquet"].execute()
+            def stdout = new StringBuilder(), stderr = new StringBuilder()
+            reader.waitForProcessOutput(stdout, stderr)
+            assert reader.exitValue() == 0 : "could not read scores.parquet: ${stderr}"
+            def scores = new groovy.json.JsonSlurper().parseText(stdout.toString())
+
+            // REC001's pair: `middle` is MISSING on the encounter side.
+            // REC002's pair: `middle` is present and DIFFERENT.
+            def missingPair = scores['encounter#1|registry#1']
+            def disagreePair = scores['encounter#2|registry#2']
+
+            assertAll(
+                {
+                    assert missingPair != null && disagreePair != null :
+                        "the two fixture pairs were never scored; blocking did not propose them"
+                },
+                {
+                    // The setup the whole assertion rests on: the two pairs
+                    // differ in EXACTLY ONE comparison level. If that ever
+                    // stops holding, the weight comparison below stops being
+                    // about missingness and starts being about whatever else
+                    // changed.
+                    assert missingPair.levels['middle'] == 'missing'
+                    assert disagreePair.levels['middle'] == 'disagree'
+                    ['given', 'family', 'birth_date'].each { field ->
+                        assert missingPair.levels[field] == disagreePair.levels[field] :
+                            "the two pairs differ on ${field} as well as on middle"
+                    }
+                },
+                {
+                    // §3.2's done-when, literally: "A fixture pair agreeing
+                    // on everything but a missing field scores above one
+                    // disagreeing on that field." Fold missing into
+                    // disagreement -- the card's Trap -- and these two
+                    // weights become equal by construction.
+                    assert missingPair.weight > disagreePair.weight :
+                        "missing (${missingPair.weight}) does not score above disagreeing " +
+                        "(${disagreePair.weight}); missingness has been folded into disagreement"
+                },
+                {
+                    // And the mechanism is visible, not merely the ordering:
+                    // missing is near-zero evidence either way, disagreeing
+                    // is evidence AGAINST.
+                    assert missingPair.contributions['middle'] > disagreePair.contributions['middle']
+                    assert disagreePair.contributions['middle'] < 0 :
+                        "disagreeing on a field is not counted as evidence against the match"
+                },
+                {
+                    // The three levels exist in the fitted model, each with
+                    // its own m and u. Folding missing into disagree -- the
+                    // card's Trap -- would leave two.
+                    def middle = model.fields.find { it.field == "middle" }
+                    assert middle != null : "the comparison spec's `middle` field is absent from model.json"
+                    assert middle.levels*.level.toSet() == ["agree", "disagree", "missing"].toSet() :
+                        "missingness is not modelled as its own level: got ${middle.levels*.level}"
+                    assert middle.levels.every { it.m != null && it.u != null } :
+                        "a level carries no m/u pair, so it contributes no evidence and is not really a level"
+                },
+                {
+                    // m and u were ESTIMATED, not assumed. §3.2's Why is that
+                    // "everything about the linkage's honesty lives in
+                    // whether those two probabilities were estimated or
+                    // assumed" -- so the run has to say which happened.
+                    assert model.provenance.m_source == "estimated_by_em"
+                    assert model.provenance.u_source == "estimated_from_random_pairs"
+                    assert model.provenance.em_iterations_run == 20
+                },
+                {
+                    // The clerical band is REPORTED, never auto-linked
+                    // (§3.3 nogo). REC002 lands in it: agreeing on three
+                    // fields and disagreeing on the fourth is exactly the
+                    // "not sure" case the band is for.
+                    assert report.n_clerical > 0 :
+                        "no pair landed in the clerical band, so the band is not being exercised at all"
+                    assert file("${params.outdir}/link/clerical_review.json").exists()
+                },
+                {
+                    // §3.3 done-when, clause 2.
+                    assert report.collapse_ratio > 0.5 :
+                        "linkage collapsed ${report.n_in} records into ${report.n_persons} persons"
+                    assert report.n_in == 24
+                }
+            )
+        }
+    }
+
+    test("both thresholds are drawn on the histogram, and it is emitted unconditionally (§3.3 done-when)") {
+
+        when {
+            params {
+                outdir               = "$outputDir"
+                input                = "${projectDir}/test_data/fixtures/link_samplesheet.csv"
+                concept_pack         = "${projectDir}/assets/packs/minimal.yaml"
+                blocking_rules       = "${projectDir}/test_data/fixtures/link_blocking_rules.yaml"
+                link_comparison_spec = "${projectDir}/test_data/fixtures/link_comparisons.yaml"
+                stop_after           = "link"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def histogram = file("${params.outdir}/link/match_histogram.png")
+            def report = new groovy.json.JsonSlurper().parse(file("${params.outdir}/link/link_report.json"))
+            def meta = report.histogram
+
+            // "The histogram exists and both thresholds are drawn on it" is
+            // the card's own done-when, and the second half of that is what
+            // an eyeball check quietly stops doing. bin/link_resolve.py
+            // publishes the pixel column and colour of each threshold line,
+            // so the claim is read back OFF THE IMAGE rather than trusted.
+            def image = javax.imageio.ImageIO.read(histogram)
+
+            assertAll(
+                { assert histogram.exists() && histogram.size() > 0 },
+                { assert image.width == meta.width && image.height == meta.height },
+                {
+                    def y = ((meta.plot_top_px_y + meta.plot_bottom_px_y) / 2) as int
+                    def clerical = image.getRGB(meta.clerical_threshold_px_x as int, y) & 0xFFFFFF
+                    def expected = ((meta.clerical_threshold_rgb[0] as int) << 16) |
+                                   ((meta.clerical_threshold_rgb[1] as int) << 8) |
+                                   (meta.clerical_threshold_rgb[2] as int)
+                    assert clerical == expected :
+                        "no clerical-threshold line at x=${meta.clerical_threshold_px_x}"
+                },
+                {
+                    def y = ((meta.plot_top_px_y + meta.plot_bottom_px_y) / 2) as int
+                    def match = image.getRGB(meta.match_threshold_px_x as int, y) & 0xFFFFFF
+                    def expected = ((meta.match_threshold_rgb[0] as int) << 16) |
+                                   ((meta.match_threshold_rgb[1] as int) << 8) |
+                                   (meta.match_threshold_rgb[2] as int)
+                    assert match == expected :
+                        "no match-threshold line at x=${meta.match_threshold_px_x}"
+                },
+                {
+                    // The two lines are distinguishable. One colour for both
+                    // would satisfy "both thresholds drawn" and tell a
+                    // reader nothing about which cut is which.
+                    assert meta.clerical_threshold_rgb != meta.match_threshold_rgb
+                    assert meta.clerical_threshold_px_x != meta.match_threshold_px_x
+                },
+                {
+                    // The axis always CONTAINS both thresholds, so neither
+                    // can be cropped out of frame on a run whose weights
+                    // happen to sit far from the cut.
+                    assert meta.weight_axis_min <= report.clerical_threshold
+                    assert meta.weight_axis_max >= report.match_threshold
+                }
+            )
+        }
+    }
+
+    test("every rule reports its pair count and the unblocked-record count, even at zero (§3.1 done-when)") {
+
+        when {
+            params {
+                outdir         = "$outputDir"
+                input          = "${projectDir}/test_data/fixtures/link_samplesheet.csv"
+                concept_pack   = "${projectDir}/assets/packs/minimal.yaml"
+                blocking_rules = "${projectDir}/assets/blocking_rules.yaml"
+                stop_after     = "block"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            // Deliberately the SHIPPED default rule list, whose keys
+            // (birth_date/sex, a name prefix, an MRN) this fixture does not
+            // carry. Every rule therefore reports zero -- and the card is
+            // explicit that the unblocked-record count must be present
+            // "even at zero", because a report that goes quiet when the
+            // rules match nothing is a report that hides a recall ceiling of
+            // zero.
+            def report = new groovy.json.JsonSlurper().parse(file("${params.outdir}/link/blocking_report.json"))
+
+            assertAll(
+                { assert report.size() == 3 : "expected one entry per rule in the shipped list" },
+                { assert report.every { it.rule_id != null } },
+                { assert report.every { it.n_pairs != null } },
+                { assert report.every { it.n_records_unblocked != null } },
+                { assert report.every { it.n_pairs == 0 } },
+                {
+                    assert report.every { it.n_records_unblocked == 24 } :
+                        "no rule applies, so every record is unblocked and the recall ceiling is zero"
+                },
+                {
+                    assert report.every { !it.warnings.isEmpty() } :
+                        "a run whose every rule is inapplicable must say so, not report zeros silently"
+                },
+                {
+                    // --stop_after block is a sub-stage of link: blocking has
+                    // run and nothing has been scored.
+                    assert !file("${params.outdir}/link/scores.parquet").exists()
+                    assert !file("${params.outdir}/link/links.parquet").exists()
+                }
+            )
+        }
+    }
+
+    test("a blocking rule keyed on the outcome variable kills the run (§3.1 nogo, Global Constraint 1)") {
+
+        when {
+            params {
+                outdir         = "$outputDir"
+                input          = "${projectDir}/test_data/fixtures/link_samplesheet.csv"
+                // minimal.yaml flags `time_to_event` outcome: true, and the
+                // fixture rule list below blocks on a column of that name.
+                // The refusal is by the pack's FLAG, never by a hard-coded
+                // column name -- unflag the variable and the same rule file
+                // is fine.
+                concept_pack   = "${projectDir}/assets/packs/minimal.yaml"
+                blocking_rules = "${projectDir}/test_data/fixtures/link_outcome_blocking_rules.yaml"
+                stop_after     = "block"
+            }
+        }
+
+        then {
+            // Killed, not degraded. Silently dropping the rule would lower
+            // the recall ceiling with nothing in any report to say so, and
+            // no later stage can tell a pair was never proposed.
+            assert workflow.failed
+            assert workflow.stdout.join("\n").contains("time_to_event") ||
+                   workflow.errorReport.contains("time_to_event")
+        }
+    }
+}

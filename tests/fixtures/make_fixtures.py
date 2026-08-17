@@ -734,6 +734,179 @@ def confirm_ledger_collision(target_dir: Path) -> Path:
     return path
 
 
+# ---------------------------------------------------------------------------
+# §3 link (docs/steps/s3-1.md, s3-2.md, s3-3.md)
+# ---------------------------------------------------------------------------
+
+def link_fixture_tables(target_dir: Path) -> tuple[Path, Path]:
+    """Two datasets of one cohort holding the SAME twelve people, so that
+    linking them has a right answer this fixture knows.
+
+    The registry table carries every field; the encounter table carries the
+    same people with controlled perturbations. The named cases §3.2's
+    done-when turns on are records 1 and 2, and they are the reason this
+    fixture exists rather than reusing MIMIC-IV demo:
+
+      REC001  agrees on every field EXCEPT `middle` which is MISSING on the
+              encounter side. Three of four comparisons agree, one is
+              missing, none disagrees.
+      REC002  agrees on exactly the same three fields and DISAGREES on
+              `middle` (a different value, not an absent one).
+
+    Every other comparison the two records make is identical, so the ONLY
+    difference between their match weights is the level `middle` resolves
+    to. If missingness were folded into disagreement -- §3.2's Trap -- the
+    two weights would be equal by construction and the test could not tell
+    the difference. That is the whole assertion.
+
+    Records 3-10 are ordinary matches with assorted typos and gaps, and
+    provide the mass EM needs to estimate m from something other than two
+    rows. Records 90-93 exist in the encounter table only and match nobody:
+    without genuine non-matches in the candidate set, the two-class mixture
+    has one class and u cannot be distinguished from m.
+
+    §10.3 generality: the values are structural identifiers, initials and
+    dates. No disease term, gene symbol or cohort name appears here."""
+    tables_dir = target_dir / "tables"
+    tables_dir.mkdir(parents=True, exist_ok=True)
+
+    header = "record_key,block_key,given,middle,family,birth_date"
+    registry_rows = [
+        "REC001,BK01,ANA,Q,RIVERA,1980-04-12",
+        "REC002,BK02,BEN,R,OKAFOR,1975-11-03",
+        "REC003,BK03,CAI,S,NOVAK,1968-01-25",
+        "REC004,BK04,DEV,T,HALLER,1991-07-19",
+        "REC005,BK05,EMI,U,SANTOS,1955-02-08",
+        "REC006,BK06,FAY,V,DUBOIS,1987-09-30",
+        "REC007,BK07,GIL,W,MARQUEZ,1972-12-14",
+        "REC008,BK08,HAN,X,LINDQVIST,1963-06-21",
+        "REC009,BK09,IVA,Y,PETROV,1999-03-05",
+        "REC010,BK10,JUN,Z,TANAKA,1984-08-27",
+    ]
+    encounter_rows = [
+        # The two cases the done-when compares. Identical in every respect
+        # except the level `middle` resolves to: missing vs disagreeing.
+        "REC001,BK01,ANA,,RIVERA,1980-04-12",
+        "REC002,BK02,BEN,K,OKAFOR,1975-11-03",
+        # Ordinary matches: agreement with assorted gaps and one typo each.
+        "REC003,BK03,CAI,S,NOVAK,1968-01-25",
+        "REC004,BK04,DEV,T,HALLER,1991-07-19",
+        "REC005,BK05,EMI,,SANTOS,1955-02-08",
+        "REC006,BK06,FAY,V,DUBOIS,1987-09-30",
+        "REC007,BK07,GIL,W,MARQUES,1972-12-14",
+        "REC008,BK08,HAN,X,LINDQVIST,1963-06-21",
+        "REC009,BK09,IVA,Y,PETROV,1999-03-05",
+        "REC010,BK10,JUN,Z,TANAKA,1984-08-27",
+        # Non-matches sharing a block with a registry record but nothing
+        # else. EM needs a second class to find; a candidate set of matches
+        # only makes m and u indistinguishable.
+        "REC090,BK01,KOR,A,ADEYEMI,1943-05-16",
+        "REC091,BK02,LUZ,B,FONTANA,1938-10-02",
+        "REC092,BK03,MIR,C,HALVORSEN,1947-01-09",
+        "REC093,BK04,NER,D,OYELARAN,1951-11-28",
+    ]
+
+    registry = tables_dir / "link_registry.csv"
+    encounter = tables_dir / "link_encounter.csv"
+    registry.write_text("\n".join([header] + registry_rows) + "\n")
+    encounter.write_text("\n".join([header] + encounter_rows) + "\n")
+    return registry, encounter
+
+
+def link_samplesheet(target_dir: Path) -> Path:
+    """One cohort, two datasets -- the JOIN-inside-a-cohort shape §1.1
+    names, which is the shape §3 links across."""
+    registry, encounter = link_fixture_tables(target_dir)
+    rows = [
+        "cohort_id,dataset_id,role,path,holdout",
+        f"COHORT_LINK,registry,clinical,{registry},false",
+        f"COHORT_LINK,encounter,treatment,{encounter},false",
+    ]
+    path = target_dir / "link_samplesheet.csv"
+    path.write_text("\n".join(rows) + "\n")
+    return path
+
+
+def link_blocking_rules(target_dir: Path) -> Path:
+    """The fixture's blocking rules. `block_key` is a surrogate that puts
+    each true pair -- and one deliberate non-match -- in the same block, so
+    the recall ceiling is 100% for the pairs this fixture is about and the
+    test measures §3.2/§3.3 rather than §3.1's recall.
+
+    The `on:` keys are QUOTED here. Unquoted, YAML 1.1 resolves the bare
+    token `on` to boolean true; bin/link_blocking.py accepts both spellings
+    precisely so the shipped assets/blocking_rules.yaml can match §3.1's
+    published contract verbatim, but a fixture has no such obligation and
+    quoting says what is meant."""
+    rules = [
+        {"id": "br_block_key", "on": ["block_key"]},
+        {"id": "br_family_birth", "on": ["substr(family, 1, 3)", "birth_date"]},
+    ]
+    path = target_dir / "link_blocking_rules.yaml"
+    path.write_text(yaml.safe_dump(rules, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def link_comparisons(target_dir: Path) -> Path:
+    """The fixture's comparison spec. Four fields, each with the three-way
+    agree/disagree/missing levels §3.2 requires.
+
+    `middle` is the field the done-when turns on, and its priors are the
+    honest ones for a middle initial: it is frequently absent for reasons
+    that have nothing to do with whether two records are the same person, so
+    its `missing` level carries similar m and u -- near-zero evidence either
+    way -- while `disagree` is strong evidence AGAINST. EM re-estimates m
+    from the fixture regardless; these are the starting point, and
+    link/model.json records that they were re-estimated."""
+    spec = {
+        "fields": [
+            {
+                "name": "given",
+                "on": "given",
+                "compare": "exact_ci",
+                "m": {"agree": 0.90, "disagree": 0.07, "missing": 0.03},
+                "u": {"agree": 0.05, "disagree": 0.92, "missing": 0.03},
+            },
+            {
+                "name": "middle",
+                "on": "middle",
+                "compare": "exact_ci",
+                "m": {"agree": 0.70, "disagree": 0.05, "missing": 0.25},
+                "u": {"agree": 0.06, "disagree": 0.69, "missing": 0.25},
+            },
+            {
+                "name": "family",
+                "on": "family",
+                "compare": "exact_ci",
+                "m": {"agree": 0.88, "disagree": 0.09, "missing": 0.03},
+                "u": {"agree": 0.02, "disagree": 0.95, "missing": 0.03},
+            },
+            {
+                "name": "birth_date",
+                "on": "birth_date",
+                "compare": "exact",
+                "m": {"agree": 0.94, "disagree": 0.04, "missing": 0.02},
+                "u": {"agree": 0.01, "disagree": 0.97, "missing": 0.02},
+            },
+        ]
+    }
+    path = target_dir / "link_comparisons.yaml"
+    path.write_text(yaml.safe_dump(spec, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def link_outcome_blocking_rules(target_dir: Path) -> Path:
+    """A blocking rule keyed on a column named by an outcome-flagged pack
+    variable -- §3.1's nogo, which bin/link_blocking.py must refuse by
+    killing the run rather than dropping the rule. Silently dropping it
+    would lower the recall ceiling with nothing in any report to say so,
+    which is the failure the check exists to prevent."""
+    rules = [{"id": "br_outcome_leak", "on": ["time_to_event"]}]
+    path = target_dir / "link_outcome_blocking_rules.yaml"
+    path.write_text(yaml.safe_dump(rules, sort_keys=False, default_flow_style=False))
+    return path
+
+
 FIXTURES = [
     valid_samplesheet,
     duplicate_samplesheet,
@@ -757,6 +930,11 @@ FIXTURES = [
     confirm_ledger_rules_order_a,
     confirm_ledger_rules_order_b,
     confirm_ledger_collision,
+    link_fixture_tables,
+    link_samplesheet,
+    link_blocking_rules,
+    link_comparisons,
+    link_outcome_blocking_rules,
 ]
 
 

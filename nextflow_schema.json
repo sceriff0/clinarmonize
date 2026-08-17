@@ -39,7 +39,7 @@
                 },
                 "stop_after": {
                     "type": ["string", "null"],
-                    "enum": ["ingest", "profile", "link", "propose", "confirm", "map", "derive", "coverage", "emit", null],
+                    "enum": ["ingest", "profile", "block", "link", "propose", "confirm", "map", "derive", "coverage", "emit", null],
                     "default": null,
                     "description": "Stage after which the pipeline halts.",
                     "help_text": "The complete nine-stage graph (§0.9). A stage not yet implemented in this phase fails with a clear \"not implemented in this phase\" message — it never silently succeeds.",
@@ -174,6 +174,88 @@
                     "description": "Stage the invariant harness holds the outcome-blindness claim over.",
                     "help_text": "widening it is a design change, not a config tweak (\u00a710.1, ADR-003). \u00a78.3's standardized-difference forest legitimately reads outcome variables for REPORTING, so an end-to-end scope would fail honestly and then get relaxed. Only 'propose' is implemented.",
                     "fa_icon": "fas fa-crosshairs"
+                },
+                "blocking_rules": {
+                    "type": "string",
+                    "fa_icon": "fas fa-th-large",
+                    "description": "Path to the §3.1 blocking rule list.",
+                    "help_text": "See schematic §3.1. The rule list, and their UNION sets maximum recall: a pair excluded by every rule can never be matched, no matter how good the comparison model is, and no later stage can tell it was excluded. link/blocking_report.json reports n_records_unblocked for exactly that reason.",
+                    "default": "assets/blocking_rules.yaml"
+                },
+                "max_block_size": {
+                    "type": "integer",
+                    "fa_icon": "fas fa-compress-arrows-alt",
+                    "description": "Largest block that is expanded into candidate pairs.",
+                    "help_text": "See schematic §3.1. A block larger than this is reported and skipped, not silently expanded. Expanding it turns the blocking pass back into the quadratic comparison it exists to avoid, and doing so quietly is how a run that \"worked\" takes a week.",
+                    "minimum": 100,
+                    "maximum": 1000000,
+                    "default": 10000
+                },
+                "max_pairs_warn_frac": {
+                    "type": "number",
+                    "fa_icon": "fas fa-exclamation-triangle",
+                    "description": "Warn when candidate pairs exceed this fraction of the full cross product.",
+                    "help_text": "See schematic §3.1. Warns when candidate pairs exceed this fraction of the within-cohort cross product -- the sign that the rules are barely narrowing the comparison space at all.",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.1
+                },
+                "link_em_iterations": {
+                    "type": "integer",
+                    "fa_icon": "fas fa-sync",
+                    "description": "EM passes estimating m in the Fellegi-Sunter model.",
+                    "help_text": "See schematic §3.2. EM passes estimating m; too few leaves m at its prior, which is an assumed number sitting inside every match weight. link/model.json records how many passes actually ran and whether m was estimated or assumed.",
+                    "minimum": 1,
+                    "maximum": 200,
+                    "default": 20
+                },
+                "link_comparison_spec": {
+                    "type": "string",
+                    "fa_icon": "fas fa-list-ol",
+                    "description": "Path to the per-field comparison spec, including the missing level.",
+                    "help_text": "See schematic §3.2. Per-field comparison levels, INCLUDING the missing level. Missingness is a third outcome with its own m and u; collapsing it into disagreement pushes true matches below the threshold, which looks exactly like under-linkage and gets fixed by moving the wrong knob.",
+                    "default": "assets/comparisons.yaml"
+                },
+                "link_u_from_random_pairs": {
+                    "type": "boolean",
+                    "fa_icon": "fas fa-dice",
+                    "description": "Estimate u by sampling random pairs rather than assuming it.",
+                    "help_text": "See schematic §3.2. Estimates u by sampling random pairs rather than assuming it. Everything about a linkage's honesty lives in whether m and u were estimated or assumed, so turning this off is a decision link/model.json records rather than hides.",
+                    "default": true
+                },
+                "link_random_pair_n": {
+                    "type": "integer",
+                    "fa_icon": "fas fa-random",
+                    "description": "Sample size for the u estimate.",
+                    "help_text": "See schematic §3.2. Sample size for the u estimate. Too small and u is noisy in exactly the fields that discriminate most, because those are the fields whose agreement is rarest among non-matches.",
+                    "minimum": 10000,
+                    "maximum": 100000000,
+                    "default": 1000000
+                },
+                "match_threshold": {
+                    "type": "number",
+                    "fa_icon": "fas fa-link",
+                    "description": "Match weight above which two records are one person.",
+                    "help_text": "See schematic §3.3. Above it, two records are one person; lowering it over-links, so N shrinks and variance is understated. Do NOT tune it until N looks right -- N is the thing being measured, and using it as the target makes the linkage unfalsifiable. Tune on the clerical band's contents (link/clerical_review.json), which are readable.",
+                    "minimum": 0,
+                    "default": 12.0
+                },
+                "clerical_threshold": {
+                    "type": "number",
+                    "fa_icon": "fas fa-user-check",
+                    "description": "Lower edge of the clerical review band.",
+                    "help_text": "See schematic §3.3. The review band: pairs at or above this and below --match_threshold are reported, never auto-linked. The band is written to link/clerical_review.json precisely so it can be read rather than resolved.",
+                    "minimum": 0,
+                    "default": 6.0
+                },
+                "max_collapse_ratio_drop": {
+                    "type": "number",
+                    "fa_icon": "fas fa-compress",
+                    "description": "Minimum acceptable n_persons / n_in after linkage.",
+                    "help_text": "See schematic §3.3. Fails the run when linkage collapses more than half the records. Connected components chains transitively, so one spurious edge can merge two people and everything they touch; collapse_ratio far from 1.0 is the alarm.",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "default": 0.5
                 },
                 "max_candidates_per_column": {
                     "type": "integer",

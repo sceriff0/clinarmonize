@@ -33,10 +33,18 @@ empty table, non-ASCII text, INT64 limits, a float just under the ledger's
 5e-5 rounding floor). It does not probe types this pipeline does not write.
 A probe that fails on a type nobody emits is a probe that gets switched off.
 
-**Widen this the moment a stage writes a nested type.** §2's profiler is
-per-column today; when it records LIST/STRUCT/DECIMAL/TIMESTAMP, that is a
-genuinely new encoding surface between the two versions, and this file is
-where that gets caught.
+**Widen this the moment a stage writes a nested type.** That moment arrived
+with §3: bin/link_score.py writes per_field_agreement as
+LIST(STRUCT(field, level, weight)) and bin/link_resolve.py writes
+source_row_id as VARCHAR[]. LIST/STRUCT is a genuinely new encoding surface
+between the two versions in a way VARCHAR/BIGINT/DOUBLE is not -- nesting
+brings its own repetition/definition levels, and an empty list, a NULL list
+and a list of one are three different encodings of things that look alike in
+a printout. All three are fixtures below.
+
+§2's profiler is still per-column, so no nested type comes from there yet.
+Widen again when it does, and when a stage first writes DECIMAL or
+TIMESTAMP.
 
 Usage
 -----
@@ -80,6 +88,55 @@ FIXTURES = [
     ("evidence_empty", """candidate_key VARCHAR, score DOUBLE""", []),
 ]
 
+# Nested fixtures (§3). Kept in a separate list because they are inserted
+# from SQL LITERALS rather than through parameter binding: how a Python list
+# or dict binds to a LIST or STRUCT column is exactly the kind of detail that
+# can differ between two duckdb minor versions, and a probe whose WRITE path
+# depends on the thing it is probing cannot fail honestly. A literal is the
+# same bytes of SQL on both sides.
+#
+# (table name, CREATE TABLE body, list of VALUES literals)
+NESTED_FIXTURES = [
+    (
+        "scores",
+        """cohort_id VARCHAR, left_id VARCHAR, right_id VARCHAR, match_weight DOUBLE,
+           per_field_agreement STRUCT(field VARCHAR, level VARCHAR, weight DOUBLE)[]""",
+        [
+            # The ordinary case: several structs, one per comparison field.
+            "('c1', 'a#1', 'b#2', 14.6546, "
+            "[{'field': 'given', 'level': 'agree', 'weight': 4.7661}, "
+            "{'field': 'middle', 'level': 'missing', 'weight': 0.2965}])",
+            # A NULL inside a struct inside a list. The handoff's
+            # effective_weight lesson in nested form: a null weight is not a
+            # zero weight, and it has to survive as null.
+            "('c1', 'a#2', 'b#3', -3.0195, "
+            "[{'field': 'middle', 'level': 'disagree', 'weight': NULL}])",
+            # An EMPTY list and a NULL list are different encodings, and both
+            # are reachable: an empty comparison spec yields the first, a pair
+            # that failed to score yields the second.
+            "('c1', 'a#3', 'b#4', 0.0, [])",
+            "('c1', 'a#4', 'b#5', NULL, NULL)",
+        ],
+    ),
+    (
+        "links",
+        """person_id VARCHAR, cohort_id VARCHAR, source_row_id VARCHAR[]""",
+        [
+            # A resolved person: several source records.
+            "('P-aaa', 'c1', ['registry#1', 'encounter#1'])",
+            # A singleton -- the common case, since every unlinked record is
+            # still a person. A one-element list and a scalar look identical
+            # in a printout and are not the same parquet.
+            "('P-bbb', 'c1', ['registry#2'])",
+            "('P-ccc', 'c1', [])",
+            "('P-ddd', 'c1', NULL)",
+            # Non-ASCII inside a nested value, matching the flat fixtures'
+            # own µ_col / ünïcode case.
+            "('P-eee', 'c1', ['µ#1', 'ünïcode#2'])",
+        ],
+    ),
+]
+
 
 def _canonical(rows, description):
     """A representation that survives JSON and still distinguishes 1 from 1.0
@@ -100,6 +157,21 @@ def _expected(body, rows):
     return _canonical(cur.fetchall(), cur.description)
 
 
+def _build_nested(con, name, body, literals):
+    """Materialise a nested fixture from SQL literals. Used by BOTH the write
+    path and the expectation, so the two cannot drift."""
+    con.execute(f"CREATE OR REPLACE TABLE {name} ({body})")
+    for literal in literals:
+        con.execute(f"INSERT INTO {name} VALUES {literal}")
+
+
+def _expected_nested(name, body, literals):
+    con = duckdb.connect()
+    _build_nested(con, name, body, literals)
+    cur = con.execute(f"SELECT * FROM {name}")
+    return _canonical(cur.fetchall(), cur.description)
+
+
 def do_write(target):
     con = duckdb.connect()
     for name, body, rows in FIXTURES:
@@ -109,7 +181,14 @@ def do_write(target):
                 f"INSERT INTO {name} VALUES ({','.join('?' * len(rows[0]))})", rows
             )
         con.execute(f"COPY {name} TO '{target}/{name}.parquet' (FORMAT PARQUET)")
-    print(f"probe: wrote {len(FIXTURES)} parquet fixtures with duckdb {duckdb.__version__}")
+    for name, body, literals in NESTED_FIXTURES:
+        _build_nested(con, name, body, literals)
+        con.execute(f"COPY {name} TO '{target}/{name}.parquet' (FORMAT PARQUET)")
+    total = len(FIXTURES) + len(NESTED_FIXTURES)
+    print(
+        f"probe: wrote {total} parquet fixtures ({len(NESTED_FIXTURES)} nested) "
+        f"with duckdb {duckdb.__version__}"
+    )
     return 0
 
 
@@ -131,6 +210,25 @@ def do_read(target):
                 f"    written : {json.dumps(want, sort_keys=True)}\n"
                 f"    read back: {json.dumps(got, sort_keys=True)}"
             )
+    for name, body, literals in NESTED_FIXTURES:
+        path = f"{target}/{name}.parquet"
+        try:
+            cur = con.execute(f"SELECT * FROM read_parquet('{path}')")
+            got = _canonical(cur.fetchall(), cur.description)
+        except Exception as exc:  # noqa: BLE001 -- any read failure is the finding
+            failures.append(
+                f"{name} (nested): host duckdb could not read it at all: {exc}. "
+                "This is the LIST/STRUCT surface \u00a73 introduced; the flat fixtures "
+                "passing tells you nothing about it."
+            )
+            continue
+        want = _expected_nested(name, body, literals)
+        if got != want:
+            failures.append(
+                f"{name} (nested): round-trip changed the values\n"
+                f"    written : {json.dumps(want, sort_keys=True)}\n"
+                f"    read back: {json.dumps(got, sort_keys=True)}"
+            )
     if failures:
         print(f"probe: FAILED with host duckdb {duckdb.__version__}")
         for f in failures:
@@ -138,7 +236,8 @@ def do_read(target):
         return 1
     print(
         f"probe: host duckdb {duckdb.__version__} reads the container's parquet "
-        f"faithfully ({len(FIXTURES)} fixtures, values identical)"
+        f"faithfully ({len(FIXTURES) + len(NESTED_FIXTURES)} fixtures, "
+        f"{len(NESTED_FIXTURES)} of them nested, values identical)"
     )
     return 0
 

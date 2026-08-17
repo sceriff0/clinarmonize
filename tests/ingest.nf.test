@@ -83,14 +83,21 @@ nextflow_pipeline {
         }
     }
 
-    test("a stage past profile fails loudly instead of silently succeeding") {
-        // 'profile' is now implemented (Task 3, s2-1/s2-2/s2-3); this
-        // exercises the next stage the graph doesn't yet cover.
+    test("a stage the graph does not yet cover fails loudly instead of silently succeeding") {
+        // The stage named here has to be one that is genuinely UNBUILT, and
+        // it keeps moving as stages land: it was 'link' until §3 was built
+        // (phase 1), and 'link' silently started passing -- the test went
+        // red for the right reason, which is the only way anyone finds out
+        // that a gate test has quietly stopped gating.
+        //
+        // 'map' is §6, build-order item 8, and the first unimplemented stage
+        // today. Move this to the next one when §6 lands; a gate test naming
+        // an implemented stage asserts nothing at all.
 
         when {
             params {
                 outdir     = "$outputDir"
-                stop_after = "link"
+                stop_after = "map"
             }
         }
 
@@ -98,6 +105,32 @@ nextflow_pipeline {
             assert !workflow.success
             def stderr = (workflow.stdout + workflow.stderr).join('\n')
             assert stderr.contains('not implemented')
+            // The message has to name what IS implemented, so the reader's
+            // next move is obvious rather than a guess.
+            assert stderr.contains('link')
+        }
+    }
+
+    test("--stop_after link is now reachable, and --stop_after block stops partway through it") {
+        // The other half of the gate: §3 is built, so 'link' must no longer
+        // be refused -- and 'block', which is a SUB-stage of link
+        // (subStages() in workflows/harmonize.nf) and deliberately not a
+        // tenth entry in §0.9's nine-stage graph, has to pass every
+        // ordering check as link does.
+
+        when {
+            params {
+                outdir     = "$outputDir"
+                stop_after = "block"
+            }
+        }
+
+        then {
+            assert workflow.success
+            assert file("${params.outdir}/link/blocking_report.json").exists()
+            // Stopped after §3.1: nothing scored, nothing resolved.
+            assert !file("${params.outdir}/link/scores.parquet").exists()
+            assert !file("${params.outdir}/link/links.parquet").exists()
         }
     }
 

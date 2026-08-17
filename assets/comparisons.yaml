@@ -1,0 +1,61 @@
+# assets/comparisons.yaml — §3.2's per-field comparison levels, INCLUDING
+# the missing level.
+#
+# The card's Trap, first because it is the one that costs a week:
+#
+#   Folding missing into disagreement. Missingness is a third outcome with
+#   its own m and u; collapsing it pushes true matches below the threshold,
+#   which looks exactly like under-linkage and gets "fixed" by moving the
+#   wrong knob.
+#
+# So every field below has THREE levels -- agree, disagree, missing -- and
+# each carries its own (m, u) pair. `m` is a PRIOR only: EM re-estimates it
+# from the candidate pairs (--link_em_iterations). `u` is estimated from
+# random pairs when --link_u_from_random_pairs is true (the default), and
+# the prior below is used only when it is false or when there are too few
+# records to sample from. Everything about a linkage's honesty lives in
+# whether those two probabilities were estimated or assumed, so which one
+# happened is recorded per field, per level, in link/model.json.
+#
+# `on` names the column. `compare` is how two values are turned into a
+# level:
+#   exact          equal after trimming; anything else disagrees
+#   exact_ci       as above, case-insensitively
+#   prefix:<n>     equal on the first n characters
+#   numeric:<tol>  both parse as numbers and differ by at most <tol>
+# A field whose column is absent from a record's dataset is MISSING for that
+# record, not absent from the model -- which is the point.
+#
+# §3.2 nogo: never include an outcome-flagged column as a comparison field,
+# even when it would help. bin/link_score.py refuses one by name, the same
+# way bin/link_blocking.py refuses an outcome-keyed blocking rule.
+fields:
+  - name: sex
+    on: gender
+    compare: exact_ci
+    m: {agree: 0.94, disagree: 0.05, missing: 0.01}
+    u: {agree: 0.50, disagree: 0.49, missing: 0.01}
+
+  - name: birth_year
+    on: anchor_year
+    compare: exact
+    m: {agree: 0.90, disagree: 0.06, missing: 0.04}
+    u: {agree: 0.02, disagree: 0.93, missing: 0.05}
+
+  - name: marital_status
+    on: marital_status
+    compare: exact_ci
+    m: {agree: 0.85, disagree: 0.05, missing: 0.10}
+    u: {agree: 0.20, disagree: 0.70, missing: 0.10}
+
+  - name: race
+    on: race
+    compare: exact_ci
+    m: {agree: 0.92, disagree: 0.04, missing: 0.04}
+    u: {agree: 0.15, disagree: 0.80, missing: 0.05}
+
+  - name: language
+    on: language
+    compare: exact_ci
+    m: {agree: 0.88, disagree: 0.04, missing: 0.08}
+    u: {agree: 0.60, disagree: 0.32, missing: 0.08}

@@ -21,6 +21,9 @@ include { PROFILE_COLUMNS as PROFILE_COLUMNS_PERMUTED } from '../modules/local/p
 include { PROPOSE_CANDIDATES } from '../modules/local/propose_candidates/main'
 include { PROPOSE_CHANNELS } from '../modules/local/propose_channels/main'
 include { PROPOSE_LEDGER } from '../modules/local/propose_ledger/main'
+include { LINK_BLOCKING } from '../modules/local/link_blocking/main'
+include { LINK_SCORE } from '../modules/local/link_score/main'
+include { LINK_RESOLVE } from '../modules/local/link_resolve/main'
 include { CONFIRM_LEDGER } from '../modules/local/confirm_ledger/main'
 include { COMPILE_RULES } from '../modules/local/compile_rules/main'
 
@@ -28,21 +31,24 @@ include { COMPILE_RULES } from '../modules/local/compile_rules/main'
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     THE NINE-STAGE GRAPH (§0.9)
 
-    'ingest' (Phase 0, Task 2), 'profile' (Task 3) and 'propose' (Task 5a)
-    are implemented in this phase. A run that tries to reach any other stage
-    fails with a clear message instead of silently succeeding as if that
-    stage had run.
+    'ingest', 'profile', 'link', 'propose' and 'confirm' are implemented. A
+    run that tries to reach any other stage fails with a clear message
+    instead of silently succeeding as if that stage had run.
 
-    'link' (§3) is deliberately never built in phase 0 at all -- no task in
-    this phase's plan owns it -- while 'propose' (§4), which sits after it
-    in stageGraph()'s canonical order, is. implementedStages() is therefore
-    NOT a contiguous prefix of stageGraph() from Task 5a onward, which is
-    why the gate below checks the REQUESTED stage's own membership rather
-    than walking the graph for the first gap: 'propose' does not read
-    anything 'link' would have produced (it consumes per-dataset profiles
-    directly), so a stage-order contiguity check here would refuse
-    --stop_after propose over a gap nothing downstream of it needs, while
-    still correctly refusing --stop_after link itself.
+    implementedStages() was NOT a contiguous prefix of stageGraph() for the
+    whole of phase 0: 'link' (§3) was unbuilt while 'propose' (§4), which
+    sits AFTER it in the canonical order, was -- because §0.7 puts link at
+    build-order item 7, after propose and confirm, "so the invariant work is
+    not blocked behind entity resolution", and §0.9 confirms the dependency
+    direction (§2 feeds §4, while §3 feeds §6). That is why the gate below
+    checks the REQUESTED stage's own membership rather than walking the
+    graph for the first gap.
+
+    §3 is now built, so the set happens to be contiguous again -- and the
+    mechanism stays exactly as it was. It is not an accident to be tidied
+    away: §6-§9 are unbuilt, and the identical situation recurs the moment
+    any later stage is built out of graph order. Do not "fix" this into a
+    prefix walk.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 def stageGraph() {
@@ -50,11 +56,32 @@ def stageGraph() {
 }
 
 def implementedStages() {
-    return ['ingest', 'profile', 'propose', 'confirm'] as Set
+    return ['ingest', 'profile', 'link', 'propose', 'confirm'] as Set
+}
+
+//
+// §3.1's done-when stops after BLOCKING (`--stop_after block`) while
+// §3.3's stops after the whole of link (`--stop_after link`). 'block' is
+// therefore a stop point the NINE-stage graph of §0.9 does not have and
+// must not gain: stageGraph() is the spec's own stage list, and adding a
+// tenth entry to it would change what every `graph.indexOf(...)` comparison
+// in this workflow means.
+//
+// It is modelled as a SUB-STAGE of link instead: it occupies link's
+// position in the graph for every ordering question, and additionally halts
+// the link block after §3.1. One map, one lookup, and stageGraph() is
+// untouched.
+//
+def subStages() {
+    return ['block': 'link']
+}
+
+def resolveGraphStage(String stage) {
+    return subStages()[stage] ?: stage
 }
 
 def requireStageImplemented(String stage) {
-    if (!(stage in implementedStages())) {
+    if (!(resolveGraphStage(stage) in implementedStages())) {
         error("Stage '${stage}' is not implemented in this phase (implemented: ${implementedStages().sort().join(', ')}). Re-run with --stop_after set to one of those.")
     }
 }
@@ -474,6 +501,16 @@ workflow CLINICALHARMONIZE {
     infer_unit_from_range  // boolean: add a low-confidence unit candidate from the value range (§2.2)
     max_failed_frac        // number:  failure-rate threshold above which the run refuses (§2.3)
     fail_sample_k          // int:     offending values carried into the failure manifest (§2.3)
+    blocking_rules         // string:  path to the §3.1 blocking rule list
+    max_block_size         // int:     a block larger than this is reported and skipped (§3.1)
+    max_pairs_warn_frac    // number:  warns when pairs exceed this fraction of the cross product (§3.1)
+    link_em_iterations     // int:     EM passes estimating m (§3.2)
+    link_comparison_spec   // string:  path to the per-field comparison spec, missing level included (§3.2)
+    link_u_from_random_pairs // boolean: estimate u by sampling rather than assuming it (§3.2)
+    link_random_pair_n     // int:     sample size for the u estimate (§3.2)
+    match_threshold        // number:  match weight above which two records are one person (§3.3)
+    clerical_threshold     // number:  lower edge of the review band; reported, never auto-linked (§3.3)
+    max_collapse_ratio_drop // number: fails the run when linkage collapses more than this share (§3.3)
     permute_outcome_seed   // int|str: test-only seed or seed range for the §10.1 harness
     invariant_n_permutations // int:   permutations required before a run counts as a proof (§10.1)
     invariant_scope        // string:  stage the invariant claim is held over (§10.1, ADR-003)
@@ -532,9 +569,17 @@ workflow CLINICALHARMONIZE {
     //
     def graph = stageGraph()
     def targetStage = stop_after ?: graph.last()
-    if (!(targetStage in graph)) {
+    if (!(targetStage in graph) && !(targetStage in subStages().keySet())) {
         error("Unknown stage '${targetStage}' for --stop_after.")
     }
+    // Every ORDERING question below asks where the run stops in the
+    // nine-stage graph, and a sub-stage answers with its parent's position:
+    // `--stop_after block` reaches exactly as far as `--stop_after link`
+    // does, and stops partway through it. Resolved once here so no
+    // comparison further down has to remember that 'block' is not in the
+    // graph -- graph.indexOf('block') is -1, which would silently read as
+    // "before ingest" and skip every stage.
+    def graphStage = resolveGraphStage(targetStage)
     //
     // §10.1 — the invariant harness is the one caller allowed past the gate.
     //
@@ -564,7 +609,7 @@ workflow CLINICALHARMONIZE {
     if (!isInvariantScopeRun) {
         requireStageImplemented(targetStage)
     }
-    if (isInvariantRun && graph.indexOf(targetStage) < graph.indexOf('profile')) {
+    if (isInvariantRun && graph.indexOf(graphStage) < graph.indexOf('profile')) {
         error("--permute_outcome_seed needs a run that reaches at least 'profile'; --stop_after ${targetStage} stops before a permuted table is ever read, so the permutation could not affect anything.")
     }
     if (isInvariantRun && invariant_scope != 'propose') {
@@ -609,7 +654,7 @@ workflow CLINICALHARMONIZE {
     // consume it.
     def ch_baseline_profiles_by_replicate = channel.empty()
 
-    if (graph.indexOf(targetStage) >= graph.indexOf('profile')) {
+    if (graph.indexOf(graphStage) >= graph.indexOf('profile')) {
         PROFILE_COLUMNS(ch_open, unitPatternsFile, profileParamsJson)
         ch_versions = ch_versions.mix(PROFILE_COLUMNS.out.versions)
 
@@ -683,6 +728,95 @@ workflow CLINICALHARMONIZE {
         ch_permuted_profiles_by_replicate = PROFILE_COLUMNS_PERMUTED.out.profile.map { meta, f -> [meta.replicate, f] }
     }
 
+    /*
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        §3 — link (s3-1 blocking, s3-2 scoring, s3-3 thresholding)
+
+        Placed AFTER the profile block and BEFORE propose, matching
+        stageGraph()'s canonical order -- but note that nothing below feeds
+        anything above or below it in this workflow. §0.9's dependency
+        direction is that §2 feeds §4 while §3 feeds §6, and §6 is not
+        built; link's outputs are terminal for now.
+
+        That is also why §10.1 does not widen in this change. The harness
+        measures ledger.proposed.yaml (invariant_scope == 'propose', ADR-003),
+        and no value computed here reaches the proposer: PROPOSE_CANDIDATES
+        consumes profiles, not links. §3 DOES compute joint statistics across
+        datasets -- m, u and match weights are exactly that -- so the moment
+        §6 consumes links.parquet, the invariant's scope has to widen with
+        it, in that change and not after it.
+
+        The invariant is nonetheless enforced inside this stage rather than
+        deferred to that day: bin/link_blocking.py refuses a blocking rule
+        keyed on an outcome-flagged variable, and bin/link_score.py refuses a
+        comparison field on one. Both refuse by the pack's FLAG, never by a
+        column name (Global Constraint 1), and both kill the run rather than
+        dropping the offending rule -- a silently dropped blocking rule
+        lowers the recall ceiling with nothing in any report to say so.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    */
+    def ch_links = channel.empty()
+    def ch_link_report = channel.empty()
+
+    if (graph.indexOf(graphStage) >= graph.indexOf('link')) {
+        // The admitted tables, as one JSON document. ch_open is a channel and
+        // LINK_BLOCKING is a single whole-run task, so the channel has to be
+        // collected before it can be handed over -- .toList() rather than a
+        // per-item map, because blocking is inherently about the SET of
+        // records (there are no pairs inside one table alone).
+        //
+        // It stays downstream of the §1.2 seal: ch_open is the filtered
+        // channel, so a held-out dataset is never named in this JSON and
+        // therefore never read by any link process.
+        def ch_link_tables_json = ch_open
+            .map { meta, table -> [cohort_id: meta.cohort_id, dataset_id: meta.dataset_id, path: table.toString()] }
+            .toList()
+            .map { rows -> groovy.json.JsonOutput.toJson(rows.sort { a, b -> (a.cohort_id + a.dataset_id) <=> (b.cohort_id + b.dataset_id) }) }
+
+        // The pack's outcome-flagged variable NAMES -- the whole of what §3
+        // is told about the outcome, and only so that it can refuse to use
+        // it. Read from the same pack file loadPackForPropose() reads.
+        def packVariablesForLink = new org.yaml.snakeyaml.Yaml().load(file(resolvePackPath(concept_pack)).text).variables
+        def outcomeVariablesJson = groovy.json.JsonOutput.toJson(packVariablesForLink.findAll { it.outcome }*.name)
+
+        LINK_BLOCKING(
+            ch_link_tables_json,
+            file(resolvePackPath(blocking_rules), checkIfExists: true),
+            outcomeVariablesJson,
+            max_block_size,
+            max_pairs_warn_frac,
+        )
+        ch_versions = ch_versions.mix(LINK_BLOCKING.out.versions)
+
+        // §3.1's done-when is `--stop_after block`: blocking has run, its
+        // report is on disk, and nothing has been scored. 'block' is a
+        // sub-stage of 'link' (see subStages() above), so it passes every
+        // graph-order check as 'link' and stops here.
+        if (targetStage != 'block') {
+            LINK_SCORE(
+                ch_link_tables_json,
+                LINK_BLOCKING.out.pairs,
+                file(resolvePackPath(link_comparison_spec), checkIfExists: true),
+                outcomeVariablesJson,
+                link_em_iterations,
+                link_u_from_random_pairs,
+                link_random_pair_n,
+            )
+            ch_versions = ch_versions.mix(LINK_SCORE.out.versions)
+
+            LINK_RESOLVE(
+                ch_link_tables_json,
+                LINK_SCORE.out.scores,
+                match_threshold,
+                clerical_threshold,
+                max_collapse_ratio_drop,
+            )
+            ch_versions = ch_versions.mix(LINK_RESOLVE.out.versions)
+            ch_links = LINK_RESOLVE.out.links
+            ch_link_report = LINK_RESOLVE.out.report
+        }
+    }
+
     //
     // §4.1 — candidate generation. Consumes the baseline profiles (replicate
     // null) AND, when the §10.1 harness is running, every permuted
@@ -696,7 +830,7 @@ workflow CLINICALHARMONIZE {
     def ch_evidence = channel.empty()
     def ch_ledgers = channel.empty()
 
-    if (graph.indexOf(targetStage) >= graph.indexOf('propose')) {
+    if (graph.indexOf(graphStage) >= graph.indexOf('propose')) {
         def (packVariablesForPropose, vocabularyRelease) = loadPackForPropose(concept_pack)
         def packVariablesJson = groovy.json.JsonOutput.toJson(packVariablesForPropose)
         def proposeParamsJson = buildProposeParamsJson(max_candidates_per_column, candidate_generators)
@@ -767,7 +901,7 @@ workflow CLINICALHARMONIZE {
     //
     def ch_confirmed = channel.empty()
 
-    if (graph.indexOf(targetStage) >= graph.indexOf('confirm')) {
+    if (graph.indexOf(graphStage) >= graph.indexOf('confirm')) {
         // The baseline's own ledger.proposed.yaml -- ch_ledgers already
         // carries it (replicate == null), so this is a second reference to
         // the SAME broadcast channel PROPOSE_LEDGER filled above, not a
@@ -888,6 +1022,8 @@ workflow CLINICALHARMONIZE {
     candidates = ch_candidates     // channel: [ val(replicate), path(candidates.parquet) ] (§4.1; replicate is null for the baseline)
     evidence   = ch_evidence       // channel: [ val(replicate), path(evidence.parquet) ] (§4.2; replicate is null for the baseline)
     ledger     = ch_ledgers        // channel: [ val(replicate), path(ledger.proposed.yaml) ] (§4.3; replicate is null for the baseline)
+    links      = ch_links          // channel: [ path(links.parquet) ] (§3.3)
+    link_report = ch_link_report   // channel: [ path(link_report.json) ] (§3.3)
     confirmed  = ch_confirmed      // channel: [ cohort_id, dataset_id, column, variable, concept_id, rule_id ] (§5.1/§5.2)
     versions   = ch_versions       // channel: [ path(versions.yml) ]
 }

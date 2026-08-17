@@ -1,0 +1,63 @@
+# assets/blocking_rules.yaml — §3.1's rule list, and the pipeline's recall
+# ceiling.
+#
+# A LIST, and recall is their UNION: a pair placed in a block by ANY rule
+# survives to §3.2, and a pair excluded by EVERY rule can never be matched,
+# no matter how good the comparison model is. No later stage can tell it was
+# excluded -- which is why link/blocking_report.json reports
+# n_records_unblocked, the count of records no rule ever placed in a block
+# with anything else. That number is the recall ceiling's shadow, and it is
+# reported even when it is zero.
+#
+# §3.1's Trap, stated so the next person adding a rule reads it: do NOT
+# choose rules by how many pairs they produce. The rule that produces the
+# fewest pairs is usually the one excluding the hard cases, and a
+# match-weight histogram with no overlap region (§3.3) is that mistake
+# showing up as an apparently clean result.
+#
+# Rule grammar -- deliberately two forms and no more. `on` is a list of key
+# components; a record's key for a rule is the tuple of its components, and
+# two records are in the same block when their whole tuple is equal. A
+# record whose key has ANY null/empty component is NOT blocked by that rule
+# (a missing key cannot establish agreement; §3.2 is where missingness
+# becomes evidence).
+#
+#   <column>                      the column's value, as written
+#   substr(<column>, <start>, <len>)   1-based substring, SQL semantics
+#
+# Anything else is refused by name at load time rather than silently
+# ignored, because a rule that quietly matches nothing is indistinguishable
+# from a rule that is doing its job on data where it does not apply.
+#
+# A rule whose columns are absent from a dataset simply does not apply to
+# that dataset. That is not an error: a cohort's datasets have different
+# schemas by construction (§1.1), and br_mrn applying only to the registry
+# table is the normal case, not a misconfiguration.
+#
+# §0 the invariant, enforced in code (bin/link_blocking.py): a rule that
+# references a column named by an outcome-flagged pack variable is refused
+# and the run dies. Blocking sets the recall ceiling, so an outcome-derived
+# block would make every downstream linkage a function of the outcome, in a
+# way no later stage could detect.
+#
+# Two YAML hazards, both of which this file walks into if it is transcribed
+# from §3.1's contract character for character:
+#
+#   1. `on:` unquoted is BOOLEAN TRUE. YAML 1.1 -- what PyYAML implements --
+#      resolves the bare token `on` the way it resolves `yes` and `no`, so
+#      the key never arrives as the string "on". bin/link_blocking.py
+#      accepts both spellings precisely so this file can keep matching the
+#      published contract; it is quoted here anyway, because a rule file
+#      that reads correctly is worth more than one that matches a typeface.
+#
+#   2. A flow sequence splits on EVERY comma. The contract writes
+#      `on: [substr(last_name,1,3), birth_year]`, which YAML reads as FOUR
+#      items -- "substr(last_name", 1, "3)", "birth_year" -- not two. The
+#      expression has to be quoted, or the rule cannot parse at all.
+#
+- id: br_dob_sex
+  "on": [birth_date, sex]
+- id: br_name3
+  "on": ["substr(last_name, 1, 3)", birth_year]
+- id: br_mrn
+  "on": [mrn]
