@@ -149,6 +149,57 @@ Until that passes, treat phase 0 as verified-in-principle rather than verified.
   negative control at that point — the channel changes from "always excluded" to "scores", and
   that is a change in the harness's own surface.
 
+## Session 2026-08-17b — provenance and CI state
+
+Three carried items closed. Nothing in the stage graph changed.
+
+**`git dirty: yes` was `logs/`.** SLURM's `#SBATCH --output=logs/clinarmonize_verify_%j.out`
+creates that file at job start — before the script's first line, and therefore before its
+own dirty check at section 2. `logs/` was not gitignored, so every cluster run reported a
+commit that identified nothing. The check now also *lists* what is dirty; a bare boolean is
+what made this cost a session to find.
+
+**The duckdb skew stays, and is now asserted rather than assumed.** It cannot be pinned
+away: duckdb >= 1.5.0 declares `requires_python >= 3.10` and ships no cp39 wheel, and the
+cluster host interpreter is python 3.9.21 — so the overlay venv's `pip install duckdb`
+resolves to 1.4.5 and *cannot* resolve to 1.5.5. Pinning both sides equal would also be
+worse than the skew, because a reader and a writer of the same build share their bugs and a
+parquet round-trip defect would round-trip cleanly.
+
+`tools/parquet_roundtrip_probe.py` runs as section 6d, before any test: the container writes
+the two schemas `propose_candidates.py` and `propose_channels.py` actually emit, the host
+reads them back, and the run dies if the values changed. Measured against the real pinned
+image under Docker — container (duckdb 1.5.5, python 3.13.15, linux/amd64) → host 1.4.5:
+values identical; sabotage one NULL score to 0.0 and the probe goes red.
+
+**Widen the probe's fixtures when a stage first writes a nested type.** LIST/STRUCT/DECIMAL/
+TIMESTAMP is where two duckdb versions have a genuinely new encoding surface; VARCHAR/BIGINT/
+DOUBLE is not.
+
+**`.github/workflows/linting.yml` is not red — it has never run.** It triggers only on
+`pull_request` and `release`, and this repo has zero PRs; all four CI runs in its history are
+`Build container`. It will go red on the first PR, and it will do so as a `CRITICAL` abort
+that produces no other lint result.
+
+The cause is upstream and unfixed on `master` and `dev`: nf-core/tools 4.1.0 corrupts
+`array` and `object` defaults in two places — `sanitise_param_default` (schema.py:194)
+`str()`s them into invalid defaults, and `build_schema_param` (schema.py:923) raises
+`AttributeError: 'list' object has no attribute 'strip'`. The second is only reachable once
+the first is fixed. Eight params here are affected, not seven: the earlier count missed
+`channel_weights`, which is `type: object`.
+
+`docs/upstream/nf-core-tools-array-defaults.md` holds a ready-to-file issue with a
+20-line reproducer, both patches, and the prior-art check. **It is drafted, not filed** —
+record the issue number in that file when it is.
+
+Patching both functions locally makes lint run to completion and reveals **25 ordinary lint
+failures** that the crash was hiding. None are schema-related; the bulk is 11x
+`nf_test_content` ("does not snapshot a 'versions.yml' file"), 6x `files_unchanged`, 3x
+`files_exist` (missing logo assets), 3x `template_strings` (Go template syntax in
+`tools/pin_container.sh` read as Jinja), 1x `schema_params`, 1x `multiqc_config`. Budget for
+those before opening the first PR, or the PR lands red for reasons unrelated to the upstream
+bug.
+
 ## Where the record lives
 
 `.superpowers/` is **gitignored**, so nothing below is in git — back it up before cleaning:
