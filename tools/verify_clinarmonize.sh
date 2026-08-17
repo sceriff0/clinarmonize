@@ -290,9 +290,28 @@ if [[ -f "$CANON" ]]; then
     && say "conda spec  : all $(ls -1 modules/local/*/environment.yml | wc -l | tr -d ' ') module copies match $CANON" \
     || die "conda spec drift (above). Re-copy $CANON over the module copies."
   say "pinned image: $(grep -ho 'container "[^"]*"' modules/local/*/main.nf | sort -u | sed 's/container //' | tr -d '\"' | head -3)"
-  if grep -q 'container "[^"]*:[^"@]*"$' modules/local/*/main.nf 2>/dev/null; then
-    say "WARNING     : at least one module pins a TAG, not a digest -- run tools/pin_container.sh"
-  fi
+  # Flag any container reference that is not digest-pinned.
+  #
+  # Done with shell `case`, deliberately, not grep. Two separate traps were hit
+  # getting this right: a pattern for "looks like a tag" matches a digest too,
+  # because in repo@sha256:<hex> a greedy [^"]* eats "@sha256" and the next
+  # colon then reads as a tag separator. And the replacement that tested
+  # `grep -qv` returned different exit statuses under ugrep (a Homebrew grep
+  # replacement) than under the GNU grep on the cluster -- so the check passed
+  # on the machine it was written on and would have been unreliable on the
+  # machine that runs it. Pattern-matching a string in the shell has none of
+  # that variance.
+  unpinned=0
+  for m in modules/local/*/main.nf; do
+    line=$(sed -n 's/.*container "\([^"]*\)".*/\1/p' "$m" | head -1)
+    [ -n "$line" ] || continue
+    case "$line" in
+      *@sha256:*) ;;
+      *) [ "$unpinned" = 0 ] && say "WARNING     : not digest-pinned -- run tools/pin_container.sh"
+         say "              $m -> $line"
+         unpinned=$((unpinned+1)) ;;
+    esac
+  done
 else
   say "NOTICE      : $CANON absent; skipping spec-drift check"
 fi
