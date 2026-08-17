@@ -38,7 +38,19 @@
 # 453-task invariant graph. 8 is the useful minimum here.
 # ============================================================================
 
-set -uo pipefail
+# No `set -uo pipefail` here, deliberately.
+#
+# It was removed after it broke the run on the cluster. `set -u` in particular
+# is hostile to this script's own preamble: `source ~/.bashrc` and
+# `eval "$(conda shell.bash hook)"` both dereference variables the site's
+# profile leaves unset, and nounset turns that into an abort before a single
+# test runs. Every variable read below already uses ${VAR:-default}, so
+# nothing here depends on nounset to be correct.
+#
+# `set -e` was never here either, for a separate reason that still holds:
+# run_chunk() captures `rc=$?` from a failing nf-test and the script must keep
+# going to write the report and the evidence tarball. Under -e a single failed
+# test would abort the job and destroy the evidence you submitted it to collect.
 
 mkdir -p logs
 
