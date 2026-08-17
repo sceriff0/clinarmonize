@@ -31,3 +31,10 @@ tests/invariant/
 # needed for review; never commit them.
 verification-*/
 clinarmonize-verification-*.tar.gz
+
+# SLURM's own stdout/stderr for tools/verify_clinarmonize.sh. #SBATCH --output
+# writes logs/clinarmonize_verify_%j.out at job start -- before the script's
+# first line runs, and therefore before its own `git dirty` check. Untracked
+# files here are why every cluster run reported "git dirty: yes", which
+# detaches the reported commit from the code it is supposed to identify.
+logs/

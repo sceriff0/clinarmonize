@@ -106,7 +106,22 @@ say "os          : $(uname -srm)"
 say "cwd         : $REPO"
 say "git commit  : $(git rev-parse --short HEAD 2>/dev/null || echo 'not a git repo')"
 say "git branch  : $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-say "git dirty   : $(test -n "$(git status --porcelain 2>/dev/null | grep -v 'verification-')" && echo yes || echo no)"
+# Listed, not merely flagged. A bare "yes" tells you the commit above no longer
+# identifies this tree, but not WHICH files to gitignore -- diagnosing that from
+# a finished report costs a whole session. `-uall` names the files instead of
+# collapsing an untracked directory to a single entry.
+#
+# The old `| grep -v 'verification-'` filter is gone on purpose: verification-*/
+# and the tarball became gitignored in 184323f, so it was dead weight, and as a
+# plain substring filter over the whole porcelain line it would also have hidden
+# a genuine edit to any path containing that word.
+DIRTY="$(git status --porcelain -uall 2>/dev/null)"
+if [[ -z "$DIRTY" ]]; then
+  say "git dirty   : no"
+else
+  say "git dirty   : YES -- the commit above does NOT identify this tree"
+  printf '%s\n' "$DIRTY" | sed 's/^/              /' | tee -a "$REPORT"
+fi
 say "cpus alloc  : ${SLURM_CPUS_PER_TASK:-$(nproc 2>/dev/null || echo '?')}"
 say "mem alloc   : ${SLURM_MEM_PER_NODE:-?} MB"
 say "partition   : ${SLURM_JOB_PARTITION:-none}"
