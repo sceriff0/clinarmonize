@@ -316,7 +316,8 @@ if [[ -f "$CANON" ]]; then
   [[ "$drift" == 0 ]] \
     && say "conda spec  : all $(ls -1 modules/local/*/environment.yml | wc -l | tr -d ' ') module copies match $CANON" \
     || die "conda spec drift (above). Re-copy $CANON over the module copies."
-  say "pinned image: $(grep -ho 'container "[^"]*"' modules/local/*/main.nf | sort -u | sed 's/container //' | tr -d '\"' | head -3)"
+  PINNED_IMAGE="$(grep -ho 'container "[^"]*"' modules/local/*/main.nf | sed 's/container //' | tr -d '\"' | sort -u | head -1)"
+  say "pinned image: $PINNED_IMAGE"
   # Flag any container reference that is not digest-pinned.
   #
   # Done with shell `case`, deliberately, not grep. Two separate traps were hit
@@ -341,6 +342,55 @@ if [[ -f "$CANON" ]]; then
   done
 else
   say "NOTICE      : $CANON absent; skipping spec-drift check"
+fi
+
+# ---------------------------------------------------------------------------
+# 6d. reader/writer compatibility  (REQUIRED -- not cosmetic)
+# ---------------------------------------------------------------------------
+# The pipeline writes parquet from INSIDE the container (duckdb 1.5.5). nf-test's
+# assertions read it back with the HOST python3's duckdb. Those are different
+# duckdbs on this cluster and cannot be made the same one:
+#
+#   duckdb >= 1.5.0 declares requires_python >= 3.10 and ships no cp39 wheel,
+#   and the host interpreter here is python 3.9 -- so `pip install duckdb`
+#   resolves to 1.4.5 and CANNOT resolve to 1.5.5.
+#
+# Pinning both sides equal would also be worse than the skew, not better: a
+# reader and a writer of the same build share their bugs, so a parquet
+# round-trip defect would round-trip cleanly and the suite would never see it.
+#
+# So the skew stays and gets asserted. This runs before any test, because a
+# host that misreads the container's output produces assertion failures that
+# look exactly like pipeline bugs -- and, worse, can produce assertion
+# *successes* on values that were silently altered in transit.
+hdr "parquet round-trip (container writes, host reads)"
+PROBE="tools/parquet_roundtrip_probe.py"
+PROBE_DIR="$OUT/roundtrip"
+mkdir -p "$PROBE_DIR"
+if [[ ! -f "$PROBE" ]]; then
+  say "NOTICE      : $PROBE absent; skipping the round-trip check"
+elif [[ -z "${PINNED_IMAGE:-}" ]]; then
+  say "NOTICE      : no pinned image resolved above; skipping the round-trip check"
+else
+  case "$ENGINE" in
+    singularity|apptainer)
+      "$ENGINE" exec -B "$REPO:$REPO" --pwd "$REPO" \
+        "docker://${PINNED_IMAGE}" python3 "$PROBE" write "$PROBE_DIR" 2>&1 | tee -a "$REPORT" ;;
+    docker|podman)
+      "$ENGINE" run --rm -v "$REPO:$REPO" -w "$REPO" \
+        "$PINNED_IMAGE" python3 "$PROBE" write "$PROBE_DIR" 2>&1 | tee -a "$REPORT" ;;
+  esac
+  if [[ ! -f "$PROBE_DIR/candidates.parquet" ]]; then
+    die "the container never wrote the round-trip fixtures -- the image is unusable, so every containerised test below would fail for that reason and not for a code reason. See the excerpt above."
+  fi
+  # The host half runs with whatever python3 section 5 left on PATH -- i.e.
+  # exactly the interpreter nf-test's assertions will use.
+  # PIPESTATUS[0], not $?: $? is tee's status, which is 0 even when the probe
+  # fails. Read it on the very next line -- any intervening command clobbers it.
+  python3 "$PROBE" read "$PROBE_DIR" 2>&1 | tee -a "$REPORT"
+  if [[ "${PIPESTATUS[0]}" -ne 0 ]]; then
+    die "host duckdb cannot faithfully read the container's parquet (above). Every parquet assertion in this suite is now untrustworthy in BOTH directions. Do not interpret the results below."
+  fi
 fi
 
 # ---------------------------------------------------------------------------
