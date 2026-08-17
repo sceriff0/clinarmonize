@@ -516,6 +516,21 @@
                     "default": "https://raw.githubusercontent.com/OHDSI/EunomiaDatasets/main/datasets",
                     "hidden": true
                 },
+                "max_memory": {
+                    "type": "string",
+                    "fa_icon": "fas fa-memory",
+                    "description": "Memory ceiling projected into process.resourceLimits by the test profiles.",
+                    "help_text": "See schematic §10.2. Keeps -profile test runnable on a laptop and in CI: conf/test.config projects this value into process.resourceLimits, so a fixture run cannot ask for more memory than the smallest machine expected to run it. Raising it makes CI pass on a machine the developers running the fixture do not have.",
+                    "pattern": "^\\d+(\\.\\d+)?\\.?\\s*(K|M|G|T)?B$",
+                    "default": "6.GB"
+                },
+                "snapshot_update": {
+                    "type": "boolean",
+                    "fa_icon": "fas fa-camera",
+                    "description": "Whether this run is permitted to regenerate nf-test snapshots.",
+                    "help_text": "See schematic §10.2. Regenerates nf-test snapshots; never true in CI. Declared as a param, not only as an nf-test CLI flag, so a snapshot-regenerating run is distinguishable from a verifying one in --help and in the params hash: §10.2's nogo is 'do not update a snapshot to make a failing test pass', and that is only auditable if the run that did it said so.",
+                    "default": false
+                },
                 "trace_report_suffix": {
                     "type": "string",
                     "fa_icon": "far calendar",

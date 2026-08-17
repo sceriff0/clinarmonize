@@ -32,4 +32,76 @@ nextflow_pipeline {
             )
         }
     }
+
+    //
+    // §10.2 — the fixture gap, asserted.
+    //
+    // The test above stops at 'ingest' and snapshots the manifest, so it
+    // proves the pipeline RUNS on the CI fixture. It cannot prove the
+    // pipeline MAPS on it, and for the whole of phase 0 it did not:
+    // -profile test paired Eunomia GiBleed with assets/packs/minimal.yaml,
+    // whose variable names (age_at_index / sex / vital_status) share no
+    // trigram or value-set overlap with OMOP CDM 5.3's headers. The run
+    // produced 35 candidate rows, ZERO distinct variables and an EMPTY
+    // ledger.proposed.yaml — correct behaviour under §4.1's SIDE clause,
+    // and a green acceptance run measuring nothing.
+    //
+    // That is a silent failure mode, which is why it needs an assertion
+    // rather than a fixture change alone: swap conf/test.config's
+    // concept_pack back to a non-overlapping pack and this test goes red,
+    // where every other test in the suite stays green. §6–§9 are built on
+    // top of this run; without this assertion they would be built, and
+    // would "pass", against zero rows.
+    //
+    // Deliberately NOT a snapshot. The claim is "at least one column
+    // resolved to at least one distinct variable, and the outcome resolved
+    // to none" — a property, not a byte string. Snapshotting the ledger
+    // would couple this test to every scoring change in §4.2 and invite
+    // exactly the nogo §10.2 closes with ("do not update a snapshot to
+    // make a failing test pass").
+    //
+    test("-profile test proposes at least one real mapping") {
+
+        when {
+            params {
+                outdir     = "$outputDir"
+                stop_after = "propose"
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def ledgerFile = file("${params.outdir}/ledger.proposed.yaml")
+            def ledger = new org.yaml.snakeyaml.Yaml().load(ledgerFile.text)
+
+            assertAll(
+                { assert ledgerFile.exists() : "§4.3's ledger was never written" },
+                {
+                    assert ledger != null && !ledger.isEmpty() :
+                        "ledger.proposed.yaml is empty: -profile test ran the pipeline without mapping anything. " +
+                        "Check that conf/test.config's concept_pack still overlaps the fixture's column headers."
+                },
+                {
+                    def proposals = ledger.collectMany { it.proposals ?: [] }
+                    assert !proposals.isEmpty() :
+                        "every ledger entry has an empty proposals list: candidates were generated but no variable survived."
+                },
+                {
+                    // The invariant (Global Constraint 1), on the real
+                    // acceptance fixture rather than only on §10.1's own.
+                    // assets/packs/omop_cdm53.yaml marks exactly one
+                    // variable outcome: true; §4.1 forbids a candidate for
+                    // it, so its name must appear nowhere in the ledger.
+                    def pack = new org.yaml.snakeyaml.Yaml().load(
+                        file("${projectDir}/assets/packs/omop_cdm53.yaml").text)
+                    def outcomeNames = pack.variables.findAll { it.outcome }*.name
+                    assert !outcomeNames.isEmpty() : "the test pack declares no outcome: true variable"
+                    def proposed = ledger.collectMany { (it.proposals ?: [])*.variable }.toSet()
+                    assert (proposed.intersect(outcomeNames)).isEmpty() :
+                        "an outcome-flagged variable ${proposed.intersect(outcomeNames)} received a candidate"
+                }
+            )
+        }
+    }
 }

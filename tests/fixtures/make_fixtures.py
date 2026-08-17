@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -237,17 +238,44 @@ def encoding_samplesheet(target_dir: Path) -> Path:
     return path
 
 
+# The concept_pack `-profile test` actually applies, read from the profile
+# rather than repeated here. matching_locked_model() below has to hash-match
+# a REAL -profile test run, and computeParamsHash() in
+# workflows/harmonize.nf folds concept_pack into that hash -- so a literal
+# path in this file silently detaches the fixture from the profile the
+# moment conf/test.config changes its pack. It did exactly that once (§10.2
+# swapped the pack from minimal.yaml to omop_cdm53.yaml and the successful
+# --unseal test went red), which is why this is parsed and not typed.
+def _test_profile_concept_pack() -> str:
+    config_path = REPO_ROOT / "conf" / "test.config"
+    match = re.search(
+        r'^\s*concept_pack\s*=\s*"\$\{projectDir\}/(?P<rel>[^"]+)"\s*$',
+        config_path.read_text(),
+        re.MULTILINE,
+    )
+    if match is None:
+        raise RuntimeError(
+            f"cannot read concept_pack out of {config_path}. "
+            "matching_locked_model() must hash-match a real -profile test run, "
+            "so it needs the pack that profile applies -- fix the parse rather "
+            "than hard-coding a path here."
+        )
+    return str(REPO_ROOT / match.group("rel"))
+
+
 def matching_locked_model(target_dir: Path) -> Path:
     """A locked_model.json that hash-matches a real `-profile test` run
-    exactly: same input (test_data/samplesheet.csv), same concept_pack
-    (assets/packs/minimal.yaml), same allow_single_dataset (false), and the
+    exactly: same input (test_data/samplesheet.csv), the same concept_pack
+    that profile sets (read from conf/test.config, never repeated here --
+    see _test_profile_concept_pack above), same allow_single_dataset
+    (false), and the
     actual current git HEAD. Covers DEFAULT_TEST_HELD_DATASET, the dataset
     -profile test's fixture marks holdout: true. This is the fixture that
     proves the successful --unseal path actually admits a held-out row
     (F2) -- covering_locked_model()'s fake hash cannot do that once F4's
     hash check is enforced."""
     input_path = str(REPO_ROOT / "test_data" / "samplesheet.csv")
-    concept_pack_path = str(REPO_ROOT / "assets" / "packs" / "minimal.yaml")
+    concept_pack_path = _test_profile_concept_pack()
     lock = {
         "analysis_git_sha": _current_git_sha(),
         "params_hash": _params_hash(input_path, concept_pack_path),

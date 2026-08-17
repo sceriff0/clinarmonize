@@ -1,0 +1,73 @@
+# assets/packs/omop_cdm53.yaml — the `-profile test` pack (§10.2)
+#
+# Why this file exists at all. `-profile test` pairs Eunomia GiBleed with a
+# pack, and the pack it used to be paired with (assets/packs/minimal.yaml)
+# declares age_at_index / sex / vital_status — names with NO trigram or
+# value-set overlap with OMOP CDM 5.3's own column headers. The run
+# therefore produced 35 candidate rows, zero distinct variables, and an
+# EMPTY ledger.proposed.yaml. That is correct behaviour (§4.1's SIDE clause
+# requires a column with no candidates to be emitted with a null
+# concept_id), and it is exactly the failure §10.2's Trap describes from the
+# other direction: the default acceptance run proved the pipeline RUNS and
+# never that it MAPS, so §6–§9 would be built, and would "pass", against
+# zero rows.
+#
+# What it is NOT. This pack does not make Eunomia a sufficient fixture. Its
+# variables are OMOP names matched against OMOP columns, so §4's matcher can
+# be badly broken and this pack will still score well — §10.2's Trap
+# verbatim. That is why -profile test_full exists and points at MIMIC-IV
+# demo (conf/test_full.config, assets/packs/clinical_core.yaml), whose
+# headers were never OMOP and never will be. Eunomia buys a fast, non-zero
+# CI signal; MIMIC-IV demo buys the honest one. Neither alone is the fixture
+# set §10.2 asks for.
+#
+# §10.3 generality: every name below is an OMOP CDM 5.3 structural or
+# demographic field. No disease term, gene symbol or cohort name appears
+# here, and none of the domain_values is a range, unit or ordering specific
+# to any one study.
+pack: omop-cdm53-core
+version: 0.1.0
+vocabulary: athena-2026-08 # pinned release; hashed
+variables:
+  # PERSON.GENDER_SOURCE_VALUE carries {F, M}; GENDER_CONCEPT_ID carries the
+  # coded form. Both single-letter codes and the spelled-out forms are
+  # enumerated so value_set matches a source column that uses either — the
+  # observed set is a SUBSET of domain_values, which is what §4.1's
+  # VALUE_SET_OVERLAP_THRESHOLD measures.
+  - name: gender
+    domain: person
+    concept_id: 0
+    type: nominal
+    domain_values: [f, m, female, male, other, unknown]
+
+  - name: year_of_birth
+    domain: person
+    concept_id: 0
+    type: continuous
+
+  # PERSON.RACE_SOURCE_VALUE's six observed values, plus the two placeholder
+  # levels a source table is allowed to carry without failing the match.
+  - name: race
+    domain: person
+    concept_id: 0
+    type: nominal
+    domain_values: [asian, black, hispanic, native, white, other, unknown]
+
+  # Deliberately ambiguous against VISIT_OCCURRENCE: VISIT_START_DATE,
+  # VISIT_START_DATETIME and VISIT_END_DATE all carry high trigram overlap
+  # with this name. §4.1 proposes all three and §4.2 is what has to rank
+  # them — a column that resolves to exactly one candidate by construction
+  # exercises the generator and nothing else.
+  - name: visit_start_date
+    domain: observation
+    concept_id: 0
+    type: nominal
+
+  # The outcome. Never receives a candidate (§4.1), and its flag — never a
+  # name — is what "the outcome variable" means anywhere in this pipeline
+  # (Global Constraint 1).
+  - name: time_to_event
+    domain: derived
+    derivation: survival_time
+    unit: day
+    outcome: true

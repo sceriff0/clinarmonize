@@ -1,0 +1,90 @@
+# assets/packs/clinical_core.yaml — the `-profile test_full` pack (§10.2)
+#
+# The pack Eunomia cannot test. Every name below is the CANONICAL target
+# name a harmonized dataset would carry, not the source header of any one
+# system -- which is the whole point: MIMIC-IV demo's headers were never
+# OMOP and never will be, so matching them is a real matching problem, and
+# a badly broken §4 matcher shows up here as a missing or wrong proposal
+# rather than as a silent pass.
+#
+# Contrast assets/packs/omop_cdm53.yaml, which is deliberately the easy
+# case: OMOP names against OMOP columns, fast, non-zero, and — on its own —
+# exactly §10.2's Trap ("a matcher can be badly broken and CI stays
+# green"). The two packs are a pair; neither is the fixture set.
+#
+# What this pack is designed to exercise, against MIMIC-IV demo v2.2:
+#
+#   sex             MIMIC's column is `gender` and carries F/M. There is NO
+#                   trigram overlap between "gender" and "sex", so this
+#                   variable can only be reached by the value_set generator
+#                   — §4.1's own Trap made real ("an institution-local
+#                   header carries no name signal at all, so a generator
+#                   list without value_set silently loses those columns").
+#   race            Name matches exactly; the VALUES do not
+#                   ("BLACK/CAPE VERDEAN", "HISPANIC/LATINO - PUERTO
+#                   RICAN"). A strong name signal with weak value evidence
+#                   is the case §4.2 exists to rank, and the case a
+#                   single-channel matcher gets wrong.
+#   marital_status  Both signals agree. The control: if this one does not
+#                   land, the failure is not subtle.
+#   length_of_stay  MIMIC's column is `los`, in days, with no unit token in
+#                   the header at all. Reachable only if a channel other
+#                   than name_similarity carries it.
+#   mortality       outcome: true. MIMIC carries `hospital_expire_flag`,
+#                   `deathtime` and `dod` — three columns that all encode
+#                   it — and NONE of them may ever receive a candidate
+#                   (§4.1), nor influence any other column's mapping
+#                   (Global Constraint 1, the invariant). This fixture is
+#                   the first one where the outcome is genuinely present in
+#                   the input in several forms.
+#
+# §10.3 generality: no disease term, gene symbol or cohort name appears
+# here. `mortality` is a vital-status endpoint, not a disease; the
+# domain_values below are administrative and demographic levels, not a
+# study-specific range, unit or ordering.
+pack: clinical-core
+version: 0.1.0
+vocabulary: athena-2026-08 # pinned release; hashed
+variables:
+  - name: sex
+    domain: person
+    concept_id: 0
+    type: nominal
+    domain_values: [f, m, female, male, other, unknown]
+
+  - name: race
+    domain: person
+    concept_id: 0
+    type: nominal
+    domain_values: [asian, black, hispanic, native, white, other, unknown]
+
+  - name: marital_status
+    domain: person
+    concept_id: 0
+    type: nominal
+    domain_values: [single, married, divorced, widowed, separated, unknown]
+
+  - name: age
+    domain: person
+    concept_id: 0
+    type: continuous
+    unit: a
+
+  - name: length_of_stay
+    domain: observation
+    concept_id: 0
+    type: continuous
+    unit: d
+
+  - name: admission_type
+    domain: observation
+    concept_id: 0
+    type: nominal
+    domain_values: [elective, emergency, urgent, observation, newborn, other]
+
+  # The outcome. Present in this fixture's input in three separate forms
+  # (hospital_expire_flag, deathtime, dod) and reachable from none of them.
+  - name: mortality
+    domain: derived
+    derivation: vital_status_at_last_contact
+    outcome: true
