@@ -43,7 +43,7 @@ process PERMUTE_OUTCOME {
     // else, so reusing one image across the phase keeps the number of
     // containers this pipeline asks you to trust at one.
     conda "${moduleDir}/environment.yml"
-    container "docker.io/bolt3x/clinarmonize-duckdb:1.5.5_pyyaml6.0.2"
+    container "docker.io/bolt3x/clinarmonize-duckdb@sha256:056f3260afbddaf99bfbd881b25f318b24ead3103bc626e4401e4f5afa03a7e0"
 
     input:
     tuple val(meta), path(table)

@@ -96,10 +96,16 @@ jobs:
           platforms: ${{ env.PLATFORMS }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ env.IMAGE }}:${{ github.event.inputs.tag || '1.5.5_pyyaml6.0.2' }}
-          # Attestations matter more than usual here: this pipeline's claims
-          # rest on being able to say what produced a given artifact.
-          provenance: mode=max
-          sbom: true
+          # Attestations OFF, deliberately. buildx publishes them as extra
+          # manifests inside an OCI index, tagged platform unknown/unknown.
+          # Apptainer/Singularity then fails to resolve the image -- which is
+          # exactly what happened on the 20260817 cluster attempt, on an image
+          # that was otherwise built and pushed correctly. An HPC pipeline that
+          # cannot be pulled by the target engine is not more trustworthy for
+          # carrying an SBOM it cannot deliver. With these off the push is a
+          # single manifest, and its digest is directly pullable.
+          provenance: false
+          sbom: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
