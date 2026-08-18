@@ -61,6 +61,67 @@ nextflow run clinarmonize/clinicalharmonize \
 > [!WARNING]
 > Please provide pipeline parameters via the CLI or Nextflow `-params-file` option. Custom config files including those provided by the `-c` Nextflow option can be used to provide any configuration _**except for parameters**_; see [docs](https://nf-co.re/docs/running/run-pipelines#using-parameter-files).
 
+### Running on an HPC cluster
+
+The checkout and the run usually want to live on different filesystems: the
+repo on `$HOME` (small, quota-bound, backed up) and the run on scratch (fast,
+large, transient). Four paths have to be pointed at scratch explicitly or they
+land beside the checkout, and one of them — `--params_hash_file` — does **not**
+follow `--outdir`. `tools/run_pipeline.sh` does that redirection for you:
+
+```bash
+export CLINARMONIZE_CACHE=/path/to/shared/container-cache   # optional, see below
+export RUN_DIR=/path/to/scratch/clinarmonize_run
+
+FIXTURES=1 bash ~/pipelines/clinarmonize/tools/run_pipeline.sh \
+    --stop_after map \
+    --input            "$RUN_DIR/fixtures/values_samplesheet.csv" \
+    --concept_pack     "$RUN_DIR/fixtures/values_pack.yaml" \
+    --confirmed_ledger "$RUN_DIR/fixtures/confirm_ledger_values.yaml" \
+    --max_unmapped_frac 0.6
+```
+
+`work/`, `results/`, `nextflow.log`, `params_hash.txt` and the generated
+fixtures all land under `$RUN_DIR`; the checkout is left untouched. Everything
+after the script name is passed straight through to `nextflow run`, so the
+script composes with normal usage rather than wrapping it.
+
+Environment variables, all optional and none with a site path baked in:
+
+| Variable | Default | What it does |
+|---|---|---|
+| `RUN_DIR` | `$PWD` | where `work/`, `results/` and `fixtures/` go |
+| `SRC_DIR` | the script's own repo | the pipeline checkout |
+| `PROFILE` | `singularity` | the `-profile` value |
+| `CONDA_ENV` | none | conda env to activate first; skip it if yours is already active |
+| `NXF_VER` | `26.04.6` | see the pin below |
+| `CLINARMONIZE_CACHE` | `$SCRATCH` or `$HOME` | shared container image cache |
+| `FIXTURES` | `0` | `1` regenerates test fixtures into `$RUN_DIR/fixtures` |
+
+Three things that bite:
+
+- **The Nextflow version is a hard pin.** `nextflow.config` declares
+  `nextflowVersion = '!>=26.04.6'`, and the leading `!` makes a mismatch an
+  abort rather than a warning; nf-schema 2.8.0 refuses anything older in any
+  case. A bare `nextflow` resolves an older release on many sites, so
+  `NXF_VER=26.04.6` is not optional. The launcher refuses a 23/24/25 value up
+  front rather than letting it surface as a plugin error.
+- **`test_data/` is gitignored**, so fixtures do not survive a clone. Run
+  `tests/fixtures/make_fixtures.py` (or `FIXTURES=1`) before any run that uses
+  them. The samplesheets it writes carry absolute paths to their own tables, so
+  generate them beside the run rather than inside the checkout.
+- **`-profile test` reads `${projectDir}/test_data/samplesheet.csv`**, which is
+  the *checkout*, not the run directory, and needs
+  `tests/fixtures/fetch_eunomia.py` to have run there. Pass `--input`
+  explicitly instead when running from scratch.
+
+A run with no `--confirmed_ledger` stops after `propose` and prints the path to
+write. That is §5's human gate doing its job, not a failure.
+
+To run the test suite under the pinned container instead, use
+`tools/verify_clinarmonize.sh` — note it expects the repo root as its working
+directory, since it writes its report there.
+
 ## Credits
 
 clinarmonize/clinicalharmonize was originally written by clinarmonize.

@@ -31,6 +31,8 @@
 #   CONDA_ENV    conda env providing nextflow/java/python   (default: nf-env)
 #   SITE_CONFIG  extra nextflow config to layer in          (default: none)
 #   NXF_VER      Nextflow version                           (default: 26.04.6)
+#   CLINARMONIZE_CACHE  shared container image cache        (default: $SCRATCH or $HOME)
+#   NFT_WORKDIR  nf-test scratch workdir                    (default: $SCRATCH or $HOME)
 #
 # NOTE ON cpus-per-task: unlike the mirage pipeline, this suite runs its tasks
 # through Nextflow's LOCAL executor inside this one allocation. Nextflow sizes
@@ -182,10 +184,16 @@ ENGINE="${ENGINE:-$(detect_engine)}"
 say "engine      : $ENGINE ($(command -v "$ENGINE"))"
 say "version     : $($ENGINE --version 2>&1 | head -1)"
 
-# Shared image cache — same location you already use for mirage, so the wave
-# images are pulled once and reused across pipelines.
+# Shared image cache. Pulling the pinned image once and reusing it across runs
+# matters more than it looks: every nf-test chunk starts a fresh Nextflow, and
+# an unset cache re-pulls the image per run.
+#
+# No site path is baked in here. The order is: whatever you already exported,
+# then $CLINARMONIZE_CACHE, then $SCRATCH, then $HOME. Set CLINARMONIZE_CACHE
+# (or the engine's own *_CACHEDIR vars) in your ~/.bashrc to point it at the
+# shared scratch location your site uses.
 if [[ "$ENGINE" == "singularity" || "$ENGINE" == "apptainer" ]]; then
-  DEFAULT_CACHE="/hpcnfs/scratch/P_DIMA_ATTEND/users/vfassi/docker_images"
+  DEFAULT_CACHE="${CLINARMONIZE_CACHE:-${SCRATCH:-$HOME}/.clinarmonize/container-cache}"
   export SINGULARITY_CACHEDIR="${SINGULARITY_CACHEDIR:-$DEFAULT_CACHE}"
   export NXF_SINGULARITY_CACHEDIR="${NXF_SINGULARITY_CACHEDIR:-$DEFAULT_CACHE}"
   export APPTAINER_CACHEDIR="${APPTAINER_CACHEDIR:-$DEFAULT_CACHE}"
@@ -260,7 +268,9 @@ fi
 hdr "workdir"
 # Keep the nf-test workdir off $HOME: hundreds of short-lived task dirs on NFS
 # is both slow and quota-hostile.
-DEFAULT_WORK="${SCRATCH:-/hpcnfs/scratch/P_DIMA_ATTEND/users/vfassi}/nf-test-clinarmonize"
+# $SCRATCH if the site defines it, $HOME otherwise -- never a baked-in site
+# path. Override with NFT_WORKDIR.
+DEFAULT_WORK="${SCRATCH:-$HOME}/nf-test-clinarmonize"
 export NFT_WORKDIR="${NFT_WORKDIR:-$DEFAULT_WORK}"
 mkdir -p "$NFT_WORKDIR" 2>/dev/null || {
   say "WARNING     : cannot write $NFT_WORKDIR -- falling back to $REPO/.nf-test"
