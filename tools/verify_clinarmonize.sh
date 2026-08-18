@@ -96,6 +96,27 @@ if [[ -f "$HOME/.bashrc" ]]; then
   # shellcheck disable=SC1091
   source "$HOME/.bashrc" 2>/dev/null || true
 fi
+
+# Whatever ~/.bashrc just did to this shell's options, undo it.
+#
+# This is not belt-and-braces; it is the fix for a real, reproduced failure
+# (SLURM 6501142 and 6502426, both FAILED 1:0 after 9s with an empty stderr
+# and no FATAL line in report.txt). A site profile that runs `set -u` leaves
+# it active for the REST of this script, and the very next line --
+# `eval "$(conda shell.bash hook)"` -- dereferences variables conda's own
+# init leaves unset.
+#
+# The `|| true` on that line does NOT protect against it. `|| true` catches a
+# non-zero RETURN; `set -u` makes the shell EXIT, and an exit cannot be
+# caught by ||. With stderr redirected to /dev/null the bash diagnostic is
+# swallowed too, so the job dies with no message anywhere -- which is exactly
+# how this presented, and why it took four hypotheses to find.
+#
+# Hence: neutralise here, once, immediately after the only line that can
+# import someone else's options. Removing `set -uo pipefail` from THIS file
+# (commit e32151e) was necessary and was never sufficient, because the
+# hostile `set` was never in this file.
+set +e +u +o pipefail
 if command -v conda >/dev/null 2>&1; then
   # 'conda activate' needs the shell hook under a non-interactive shell
   eval "$(conda shell.bash hook)" 2>/dev/null || true
