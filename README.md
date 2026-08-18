@@ -72,13 +72,24 @@ follow `--outdir`. `tools/run_pipeline.sh` does that redirection for you:
 ```bash
 export CLINARMONIZE_CACHE=/path/to/shared/container-cache   # optional, see below
 export RUN_DIR=/path/to/scratch/clinarmonize_run
+mkdir -p "$RUN_DIR"
+
+echo '{ "max_unmapped_frac": 0.6 }' > "$RUN_DIR/params.json"
 
 FIXTURES=1 bash ~/pipelines/clinarmonize/tools/run_pipeline.sh \
-    --stop_after map \
+    -params-file       "$RUN_DIR/params.json" \
+    --stop_after       map \
     --input            "$RUN_DIR/fixtures/values_samplesheet.csv" \
     --concept_pack     "$RUN_DIR/fixtures/values_pack.yaml" \
-    --confirmed_ledger "$RUN_DIR/fixtures/confirm_ledger_values.yaml" \
-    --max_unmapped_frac 0.6
+    --confirmed_ledger "$RUN_DIR/fixtures/confirm_ledger_values.yaml"
+```
+
+Or, as a batch job, which does all of the above for you:
+
+```bash
+cd ~/pipelines/clinarmonize && mkdir -p logs
+RUN_DIR=/path/to/scratch/clinarmonize_run \
+    sbatch --partition=<your-partition> tools/sbatch_run_pipeline.sh
 ```
 
 `work/`, `results/`, `nextflow.log`, `params_hash.txt` and the generated
@@ -114,6 +125,12 @@ Three things that bite:
   the *checkout*, not the run directory, and needs
   `tests/fixtures/fetch_eunomia.py` to have run there. Pass `--input`
   explicitly instead when running from scratch.
+- **Numeric and boolean params must go through `-params-file`, not the CLI.**
+  nf-schema types a bare `--max_unmapped_frac 0.6` as a *string* and rejects it
+  against the schema's `"type": "number"`: `Value is [string] but should be
+  [number]`. A `-params-file` carries real JSON types and validates. Path and
+  enum params are unaffected, which is why the CLI works for most of them and
+  fails confusingly for the rest.
 
 A run with no `--confirmed_ledger` stops after `propose` and prints the path to
 write. That is §5's human gate doing its job, not a failure.
