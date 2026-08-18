@@ -140,8 +140,14 @@ Three things that bite:
   with `IOException: No files found that match the pattern ...` even though the
   file plainly exists. `tools/run_pipeline.sh` binds `RUN_DIR` and `SRC_DIR`
   for you; put anything else — a cohort table on a third filesystem — in
-  `CLINARMONIZE_BIND` (comma-separated). Invoking `nextflow run` directly means
-  setting `APPTAINER_BIND`/`SINGULARITY_BIND` yourself.
+  `CLINARMONIZE_BIND` (comma-separated). Note that the `SINGULARITY_BIND` /
+  `APPTAINER_BIND` environment variables do **not** work for this: Nextflow
+  invokes the engine with a cleaned environment (`env - PATH=... singularity
+  exec ...`, which is also why it forwards task variables via the
+  `SINGULARITYENV_` prefix), so an exported bind list is wiped before
+  singularity reads it. The working mechanism is `singularity.runOptions`,
+  which the launcher generates into `$RUN_DIR/.clinarmonize-binds.config` and
+  passes with `-c`.
 - **Numeric and boolean params must go through `-params-file`, not the CLI.**
   nf-schema types a bare `--max_unmapped_frac 0.6` as a *string* and rejects it
   against the schema's `"type": "number"`: `Value is [string] but should be

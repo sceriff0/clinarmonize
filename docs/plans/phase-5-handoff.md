@@ -461,8 +461,14 @@ Carried, unchanged, and not widened by this phase:
   outside `$HOME` to appear at all, and no run had ever had them. **It affects
   real cohort data on scratch exactly as much as it affects fixtures.**
 
-  `tools/run_pipeline.sh` works around it by exporting `APPTAINER_BIND` /
-  `SINGULARITY_BIND` for `RUN_DIR`, `SRC_DIR` and `$CLINARMONIZE_BIND`. That is
+  `tools/run_pipeline.sh` works around it by generating a
+  `singularity.runOptions` config binding `RUN_DIR`, `SRC_DIR` and
+  `$CLINARMONIZE_BIND`, passed with `-c`. The obvious route — exporting
+  `SINGULARITY_BIND` / `APPTAINER_BIND` — was tried first and does **not**
+  work: Nextflow launches the engine with a cleaned environment
+  (`env - PATH=... singularity exec ...`), which is why it forwards task
+  variables through the `SINGULARITYENV_` prefix at all, and an exported bind
+  list is wiped before singularity reads it. That is
   a workaround in the launcher, not a fix in the pipeline: anyone invoking
   `nextflow run` directly still hits it. The fix is to make those four inputs
   real staged `path` inputs, which is a §3/§6.1 contract change and wants its
