@@ -491,10 +491,50 @@ fi
 # ---------------------------------------------------------------------------
 # 8. run
 # ---------------------------------------------------------------------------
-FAST_TESTS="tests/default.nf.test tests/ingest.nf.test tests/profile_columns.nf.test \
-tests/profile_units.nf.test tests/propose_candidates.nf.test tests/propose_channels.nf.test \
-tests/propose_ledger.nf.test tests/confirm_ledger.nf.test tests/rules_stable.nf.test"
+# The chunk split is about RUNTIME, and nothing else. SLOW_TESTS is the only
+# hand-maintained list; FAST_TESTS is everything else found on disk.
+#
+# This was two hand-maintained lists until 20260818, and the omission that
+# caused is the reason it is not any more. tests/link_score.nf.test,
+# tests/map_concepts.nf.test and tests/units.nf.test were in NEITHER list, so
+# 13 of the suite's 61 tests had never executed under a container -- while the
+# report said "ALL REQUESTED TESTS PASSED" and named no shortfall. Every
+# phase since §3 landed a test file that this harness silently declined to
+# run, and each of those phases recorded F2 as clean on the strength of it.
+#
+# A hand-maintained list is a list that goes stale on the next phase that
+# adds a file. Deriving from the filesystem means a new test file is IN by
+# default and has to be deliberately moved to be slow -- the opposite failure
+# direction, and the survivable one.
 SLOW_TESTS="tests/invariant.nf.test tests/invariant_leak_control.nf.test"
+
+ALL_TESTS=""
+for _t in tests/*.nf.test; do
+  [[ -e "$_t" ]] && ALL_TESTS="$ALL_TESTS $_t"
+done
+[[ -n "$ALL_TESTS" ]] || die "no tests/*.nf.test found in $REPO -- refusing to report a verdict over an empty suite."
+
+FAST_TESTS=""
+for _t in $ALL_TESTS; do
+  case " $SLOW_TESTS " in
+    *" $_t "*) ;;
+    *) FAST_TESTS="$FAST_TESTS $_t" ;;
+  esac
+done
+
+# A SLOW_TESTS entry that no longer exists means a rename moved a slow test
+# out of every chunk. Refuse: a verdict is worth exactly what it measured.
+for _t in $SLOW_TESTS; do
+  [[ -f "$_t" ]] || die "SLOW_TESTS names '$_t', which does not exist. It was renamed or deleted and is now in NO chunk; fix the list rather than reporting a verdict that skips it."
+done
+
+hdr "suite coverage"
+say "test files  : $(echo $ALL_TESTS | wc -w | tr -d ' ') on disk"
+say "fast chunk  : $(echo $FAST_TESTS | wc -w | tr -d ' ') file(s)"
+say "slow chunk  : $(echo $SLOW_TESTS | wc -w | tr -d ' ') file(s)"
+if [[ "$CHUNK" != "all" ]]; then
+  say "WARNING     : CHUNK=$CHUNK -- this run measures ONE chunk. The verdict below covers only it."
+fi
 
 run_chunk() {
   local name="$1"; shift
@@ -544,10 +584,19 @@ say "report      : $REPORT"
 say "tarball     : $TARBALL"
 
 hdr "VERDICT"
+# The verdict names its own SCOPE. "ALL REQUESTED TESTS PASSED" was true of
+# the 20260818 run that skipped 13 tests, and that is precisely the problem:
+# a reader has to be able to tell a full pass from a partial one without
+# doing arithmetic on two numbers printed 300 lines apart.
+case "$CHUNK" in
+  all)  VERDICT_SCOPE="all $(echo $ALL_TESTS | wc -w | tr -d ' ') test file(s)" ;;
+  fast) VERDICT_SCOPE="the fast chunk ONLY ($(echo $FAST_TESTS | wc -w | tr -d ' ') of $(echo $ALL_TESTS | wc -w | tr -d ' ') file(s)) -- NOT a full-suite result" ;;
+  *)    VERDICT_SCOPE="the $CHUNK chunk ONLY ($(echo $SLOW_TESTS | wc -w | tr -d ' ') of $(echo $ALL_TESTS | wc -w | tr -d ' ') file(s)) -- NOT a full-suite result" ;;
+esac
 if [[ $RC -eq 0 ]]; then
-  say "ALL REQUESTED TESTS PASSED under $ENGINE"
+  say "PASSED under $ENGINE: $VERDICT_SCOPE"
 else
-  say "FAILURES PRESENT -- see excerpts above and the tarball"
+  say "FAILURES PRESENT under $ENGINE ($VERDICT_SCOPE) -- see excerpts above and the tarball"
 fi
 
 echo "=================================================="
