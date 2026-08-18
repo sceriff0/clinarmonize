@@ -443,9 +443,33 @@ Carried, unchanged, and not widened by this phase:
 * **The new tests do not snapshot `versions.yml`**, adding to the
   `nf_test_content` lint failures already sitting behind the nf-core/tools
   crash.
-* **The permuted tables are passed by absolute path, not staged.** Pre-existing
-  §3/§6 property. `VALUE_MAP` does not extend it — its `mapped_in/` is a real
-  staged `path` input, like `CONVERT_UNITS`'.
+* **Source tables are passed by absolute path, not staged — and this is a real
+  bug, not a curiosity.** `LINK_BLOCKING`, `LINK_SCORE`, `LINK_RESOLVE` and
+  `MAP_CONCEPTS` take `val(tables_json)`, a JSON string of absolute paths,
+  rather than staged `path` inputs. Nextflow therefore does not know they are
+  files, and `singularity.autoMounts` has nothing to bind. Under
+  `-profile singularity` any input outside an auto-mounted path (`$HOME`,
+  `/tmp`, the work dir) is simply **not there** inside the container:
+
+  ```
+  IOException: No files found that match the pattern "/beegfs/.../values_fixture.csv"
+  ```
+
+  Confirmed on the cluster 2026-08-18, with the fixtures on scratch. It
+  survived a full container verification because that run's fixtures lived
+  under the checkout in `$HOME`, which auto-mounts — the failure needs inputs
+  outside `$HOME` to appear at all, and no run had ever had them. **It affects
+  real cohort data on scratch exactly as much as it affects fixtures.**
+
+  `tools/run_pipeline.sh` works around it by exporting `APPTAINER_BIND` /
+  `SINGULARITY_BIND` for `RUN_DIR`, `SRC_DIR` and `$CLINARMONIZE_BIND`. That is
+  a workaround in the launcher, not a fix in the pipeline: anyone invoking
+  `nextflow run` directly still hits it. The fix is to make those four inputs
+  real staged `path` inputs, which is a §3/§6.1 contract change and wants its
+  own task.
+
+  `CONVERT_UNITS` and `VALUE_MAP` do **not** extend the problem — their
+  `mapped_in/` and factor table are real staged `path` inputs.
 * **`tools/parquet_roundtrip_probe.py` still does not cover DECIMAL.** §6.3
   did not need it: `value_as_concept_id` is BIGINT and `value_rule_id` is
   VARCHAR, both already covered. The next stage that writes a DECIMAL has to

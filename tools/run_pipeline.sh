@@ -22,6 +22,8 @@
 #                                                         your env is already active)
 #   NXF_VER     Nextflow version                         (default: 26.04.6)
 #   CLINARMONIZE_CACHE  shared container image cache     (default: $SCRATCH or $HOME)
+#   CLINARMONIZE_BIND   extra container bind mounts,     (default: none; RUN_DIR
+#                       comma-separated                   and SRC_DIR are always bound)
 #   FIXTURES    1 = regenerate test fixtures into $RUN_DIR/fixtures first
 #
 # Everything after the script name is passed straight through to `nextflow run`,
@@ -105,6 +107,30 @@ case "$PROFILE" in
     export NXF_APPTAINER_CACHEDIR="${NXF_APPTAINER_CACHEDIR:-$DEFAULT_CACHE}"
     mkdir -p "$NXF_SINGULARITY_CACHEDIR" 2>/dev/null || \
       die "cannot create image cache at $NXF_SINGULARITY_CACHEDIR -- set CLINARMONIZE_CACHE to a writable path."
+
+    # Bind mounts, and why this is not optional.
+    #
+    # Singularity/Apptainer auto-mounts $HOME, /tmp and $PWD, and Nextflow's
+    # `singularity.autoMounts = true` adds the work directory and the paths of
+    # STAGED inputs. That covers most pipelines and does not cover this one:
+    # §3's three processes and §6.1 take their source tables as
+    # `val(tables_json)` -- a JSON string of ABSOLUTE paths -- rather than as
+    # staged `path` inputs, so Nextflow cannot know they are files and has
+    # nothing to bind. A table on a scratch filesystem is then simply not
+    # there inside the container:
+    #
+    #   IOException: No files found that match the pattern "/scratch/.../x.csv"
+    #
+    # This is invisible until someone puts inputs outside $HOME, which is why
+    # it survived a full container verification: that run's fixtures lived
+    # under the checkout in $HOME, which auto-mounts.
+    #
+    # RUN_DIR and SRC_DIR are bound because this script knows both. Anything
+    # else -- a cohort table on a third filesystem -- goes in
+    # CLINARMONIZE_BIND, comma-separated.
+    _bind="$RUN_DIR,$SRC_DIR${CLINARMONIZE_BIND:+,$CLINARMONIZE_BIND}"
+    export APPTAINER_BIND="${APPTAINER_BIND:+$APPTAINER_BIND,}$_bind"
+    export SINGULARITY_BIND="${SINGULARITY_BIND:+$SINGULARITY_BIND,}$_bind"
     ;;
 esac
 
@@ -129,6 +155,7 @@ say "RUN_DIR"  "$RUN_DIR"
 say "profile"  "$PROFILE"
 say "NXF_VER"  "$NXF_VER"
 [[ -n "${NXF_SINGULARITY_CACHEDIR:-}" ]] && say "image cache" "$NXF_SINGULARITY_CACHEDIR"
+[[ -n "${APPTAINER_BIND:-}" ]]            && say "binds" "$APPTAINER_BIND"
 echo
 
 cd "$RUN_DIR" || die "cannot cd to '$RUN_DIR'."

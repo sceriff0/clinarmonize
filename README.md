@@ -113,6 +113,7 @@ Environment variables, all optional and none with a site path baked in:
 | `CONDA_ENV` | none | conda env to activate first; skip it if yours is already active |
 | `NXF_VER` | `26.04.6` | see the pin below |
 | `CLINARMONIZE_CACHE` | `$SCRATCH` or `$HOME` | shared container image cache |
+| `CLINARMONIZE_BIND` | none | extra container bind mounts, comma-separated; `RUN_DIR` and `SRC_DIR` are always bound |
 | `FIXTURES` | `0` | `1` regenerates test fixtures into `$RUN_DIR/fixtures` |
 
 Three things that bite:
@@ -131,6 +132,16 @@ Three things that bite:
   the *checkout*, not the run directory, and needs
   `tests/fixtures/fetch_eunomia.py` to have run there. Pass `--input`
   explicitly instead when running from scratch.
+- **Container bind mounts are not automatic for input tables.** Singularity
+  auto-mounts `$HOME`, `/tmp` and the work directory, and Nextflow adds staged
+  inputs — but §3 and §6.1 receive their source tables as a JSON string of
+  absolute paths rather than as staged inputs, so nothing binds their
+  directory. An input on a scratch filesystem then fails inside the container
+  with `IOException: No files found that match the pattern ...` even though the
+  file plainly exists. `tools/run_pipeline.sh` binds `RUN_DIR` and `SRC_DIR`
+  for you; put anything else — a cohort table on a third filesystem — in
+  `CLINARMONIZE_BIND` (comma-separated). Invoking `nextflow run` directly means
+  setting `APPTAINER_BIND`/`SINGULARITY_BIND` yourself.
 - **Numeric and boolean params must go through `-params-file`, not the CLI.**
   nf-schema types a bare `--max_unmapped_frac 0.6` as a *string* and rejects it
   against the schema's `"type": "number"`: `Value is [string] but should be
