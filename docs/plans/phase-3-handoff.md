@@ -14,8 +14,8 @@ been executed under a container.
 
 ## State
 
-* Branch `main`, HEAD is this commit's parent `0b31a80`. Still **not pushed**;
-  no PR has ever been opened.
+* Branch `main`, HEAD `35044c2`. Still **not pushed**; no PR has ever been
+  opened.
 * **Suite: 56/56 green** under `-profile test` on the host, 1010s (53 at the
   end of phase 2). The three new tests are two in `tests/invariant.nf.test`
   and one in `tests/invariant_leak_control.nf.test`.
