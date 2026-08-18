@@ -437,6 +437,30 @@
                     "help_text": "Which quantiles the range check uses, so outliers alone cannot fail it (\u00a76.2). Evaluated over CONVERTED values, per pack variable across every rule that writes it. Widening to [0.0, 1.0] makes a single transcription error fail the run; narrowing further hides more of the tail.",
                     "fa_icon": "fas fa-percentage"
                 },
+                "max_fan_in_warn": {
+                    "type": "integer",
+                    "default": 3,
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "A collapse wider than this is flagged in the QC report.",
+                    "help_text": "A collapse wider than this is flagged in the QC report (\u00a76.3), as `wide_collapse` on its qc/value_collapse.json entry. It never stops the run: the card's effect column names a flag and no exit code, and a wide collapse is a judgement about how much distinction was worth losing, which is the reviewer's to make and the report's to surface. fan_in is len(from) and is recorded on EVERY entry regardless of this threshold.",
+                    "fa_icon": "fas fa-compress-arrows-alt"
+                },
+                "emit_alluvial": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Emit the alluvial plot of every value collapse.",
+                    "help_text": "The plot that makes a collapse visible at all (\u00a76.3): every source value on the left, the canonical value on the right, ribbon width proportional to row count, and the values no group claims drawn with no ribbon leaving them. False suppresses the PNG and is RECORDED on every qc/value_collapse.json entry -- the nogo (\"Never suppress the alluvial plot because the collapse looked obvious\") forbids \u00a76.3 deciding, never an operator, and a suppression that also hid itself would be the nogo by another route.",
+                    "fa_icon": "fas fa-project-diagram"
+                },
+                "unmapped_value_policy": {
+                    "type": "string",
+                    "default": "manifest",
+                    "enum": ["manifest", "fail"],
+                    "description": "Whether an unmappable value stops the run or is recorded.",
+                    "help_text": "Whether an unmappable value stops the run or is recorded (\u00a76.3). Scoped to columns the confirmed ledger DID value-map: a column with no value vocabulary has none to be outside of. `manifest` writes qc/value_unmapped.json and proceeds; `fail` stops the run naming every value, on the reading that a reviewed value vocabulary which does not cover its own value set is a gap in the review. qc/value_unmapped.json is written under both, and before the exit under `fail`.",
+                    "fa_icon": "fas fa-question-circle"
+                },
                 "generality_terms": {
                     "type": "string",
                     "default": "assets/forbidden_terms.txt",

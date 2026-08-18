@@ -28,6 +28,7 @@ include { CONFIRM_LEDGER } from '../modules/local/confirm_ledger/main'
 include { COMPILE_RULES } from '../modules/local/compile_rules/main'
 include { MAP_CONCEPTS } from '../modules/local/map_concepts/main'
 include { CONVERT_UNITS } from '../modules/local/convert_units/main'
+include { VALUE_MAP } from '../modules/local/value_map/main'
 //
 // ADR-004 -- `--invariant_scope map` re-runs LINK and MAP on every permuted
 // replicate, through the SAME processes the baseline uses, under aliases.
@@ -54,6 +55,18 @@ include { MAP_CONCEPTS  as MAP_CONCEPTS_PERMUTED  } from '../modules/local/map_c
 // re-deriving why measuring something else is equivalent.
 //
 include { CONVERT_UNITS as CONVERT_UNITS_PERMUTED } from '../modules/local/convert_units/main'
+//
+// §6.3 is INSIDE the 'map' stage too, and it is now the LAST writer of
+// `mapped/` -- so ADR-004's artefact is THIS process's output. The amendment
+// at the foot of ADR-004 says why the alias is not optional: `ch_mapped` is
+// rebound at each stage of §6 and ARTEFACT_DIGEST consumes it, so a §6.3 that
+// ran on the baseline and not on the replicates would digest a baseline
+// carrying value_as_concept_id against replicates that never had the column,
+// and every replicate would differ from the baseline for a reason that is not
+// a leak. Running it and NOT digesting it is the mirror failure: [SUCCESS]
+// over bytes the run does not publish.
+//
+include { VALUE_MAP as VALUE_MAP_PERMUTED } from '../modules/local/value_map/main'
 include { ARTEFACT_DIGEST } from '../modules/local/artefact_digest/main'
 
 /*
@@ -449,6 +462,20 @@ def buildConvertParamsJson(Boolean failOnImplausibleRange, List plausibleRangeQu
     ])
 }
 
+//
+// §6.3's three Params rows, as their own document -- same reasoning as
+// buildConvertParamsJson's own: bin/value_map.py reads no §6.1 or §6.2 param
+// and neither of those reads a §6.3 one, and a shared blob would let any of
+// them start doing so without the wiring saying it had.
+//
+def buildValueParamsJson(Integer maxFanInWarn, Boolean emitAlluvial, String unmappedValuePolicy) {
+    return groovy.json.JsonOutput.toJson([
+        max_fan_in_warn      : maxFanInWarn,
+        emit_alluvial        : emitAlluvial,
+        unmapped_value_policy: unmappedValuePolicy,
+    ])
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     §10.1 — the outcome-permutation harness
@@ -591,6 +618,9 @@ workflow CLINICALHARMONIZE {
     unit_conversion_table   // string:  analyte-aware factors; the ONLY source of conversions (§6.2)
     fail_on_implausible_range // boolean: a converted distribution outside the pack range stops the run (§6.2)
     plausible_range_quantiles // list:   which quantiles the range check reads, so outliers alone cannot fail it (§6.2)
+    max_fan_in_warn         // int:     a collapse wider than this is flagged in the QC report (§6.3)
+    emit_alluvial           // boolean: the plot that makes a collapse visible at all (§6.3)
+    unmapped_value_policy   // string:  whether an unmappable value stops the run or is recorded (§6.3)
     outdir                 // string:  output directory
 
     main:
@@ -1162,6 +1192,8 @@ workflow CLINICALHARMONIZE {
     def ch_mapped = channel.empty()
     def ch_unmapped = channel.empty()
     def ch_unit_conversions = channel.empty()
+    def ch_value_collapse = channel.empty()
+    def ch_value_unmapped = channel.empty()
 
     // Hoisted out of the map block for the same reason outcomeVariablesJson
     // was hoisted out of the link block: the map-scoped harness below feeds
@@ -1170,6 +1202,7 @@ workflow CLINICALHARMONIZE {
     def packVariablesForMapJson = groovy.json.JsonOutput.toJson(packVariablesForMap)
     def mapParamsJson = buildMapParamsJson(cdm_version, cdm_domains, max_unmapped_frac, keep_source_concept)
     def convertParamsJson = buildConvertParamsJson(fail_on_implausible_range, plausible_range_quantiles)
+    def valueParamsJson = buildValueParamsJson(max_fan_in_warn, emit_alluvial, unmapped_value_policy)
     // Resolved once, outside the block, for the same reason: the permuted
     // replicates below convert against the IDENTICAL factor table. A second
     // file() call is a second chance for the two halves of the harness to be
@@ -1201,10 +1234,10 @@ workflow CLINICALHARMONIZE {
         // §6.1 and §6.2 -- a mapped table whose units were never converted is
         // not a smaller result, it is a result in unknown units.
         //
-        // ch_mapped is REBOUND to this process's output, so every consumer of
-        // mapped/ -- conf/modules.config's publishDir, ARTEFACT_DIGEST under
-        // ADR-004, and §6.3 when it is built -- sees the converted artefact
-        // and there is only ever one mapped/ in the repo's vocabulary.
+        // §6.3 (below) consumes THIS process's output and rebinds ch_mapped
+        // onward, so the converted artefact is what gets value-mapped and
+        // there is only ever one mapped/ in the repo's vocabulary. This is
+        // where the chain hands over, not where it ends.
         //
         CONVERT_UNITS(
             MAP_CONCEPTS.out.mapped,
@@ -1214,8 +1247,33 @@ workflow CLINICALHARMONIZE {
             convertParamsJson,
         )
         ch_versions = ch_versions.mix(CONVERT_UNITS.out.versions)
-        ch_mapped = CONVERT_UNITS.out.mapped
         ch_unit_conversions = CONVERT_UNITS.out.conversions
+
+        //
+        // §6.3 — map value vocabularies, and show every collapse.
+        //
+        // The third part of 'map', and the same non-stage §6.2 is: there is
+        // no --stop_after value between §6.1, §6.2 and §6.3, because a mapped
+        // table whose categorical columns still carry each cohort's own value
+        // grain is not a smaller result, it is a result in unharmonized
+        // vocabularies.
+        //
+        // ch_mapped is REBOUND here, taking over from CONVERT_UNITS, so the
+        // single publisher of results/mapped/ (conf/modules.config) and the
+        // artefact ADR-004's digest is taken over are the SAME bytes -- which
+        // is the whole point of there being exactly one `mapped/` in this
+        // repo's vocabulary. §7 will take it over in turn.
+        //
+        VALUE_MAP(
+            CONVERT_UNITS.out.mapped,
+            ch_ruleset,
+            packVariablesForMapJson,
+            valueParamsJson,
+        )
+        ch_versions = ch_versions.mix(VALUE_MAP.out.versions)
+        ch_mapped = VALUE_MAP.out.mapped
+        ch_value_collapse = VALUE_MAP.out.collapse
+        ch_value_unmapped = VALUE_MAP.out.unmapped_values
     }
 
     /*
@@ -1235,7 +1293,15 @@ workflow CLINICALHARMONIZE {
             profile the permuted tables                     PROFILE_COLUMNS_PERMUTED
             link   the permuted tables                      LINK_*_PERMUTED
             map    them against the BASELINE's ruleset      MAP_CONCEPTS_PERMUTED
+            convert units, BASELINE factors and params      CONVERT_UNITS_PERMUTED
+            value-map, BASELINE ruleset and params          VALUE_MAP_PERMUTED
             digest mapped/ canonically                      ARTEFACT_DIGEST
+
+        The last three lines grow with §6. `mapped/` is whatever the LAST
+        writer of it wrote, and each part of §6 has taken that role from the
+        one before (ADR-004's amendments). A replicate that stopped at an
+        earlier part would be digesting a different artefact from the baseline
+        it is compared against, which reads as a leak in every replicate.
 
         §5 is NOT re-run. It is a human gate: ledger.confirmed.yaml carries a
         proposed_hash keyed to the BASELINE's ledger.proposed.yaml, and a
@@ -1323,6 +1389,29 @@ workflow CLINICALHARMONIZE {
         )
         ch_versions = ch_versions.mix(CONVERT_UNITS_PERMUTED.out.versions.first())
 
+        // §6.3 on every replicate, for the reason §6.2 runs on every
+        // replicate: `mapped/` is whatever the LAST writer of it wrote, and
+        // that is now this process. The ruleset is the BASELINE's, so the
+        // collapse groups are held fixed exactly as the column maps and the
+        // conversion factors are -- what varies across replicates is the
+        // permuted outcome and nothing else.
+        //
+        // The card's own value-level argument for digesting §6.3's output
+        // rather than §6.2's is stronger than §6.2's was for its own case: a
+        // value collapse is many-to-one, so it can only ever LOSE
+        // distinctions. Digesting before it would compare artefacts whose
+        // distinctions had not yet been merged, and a leak that survived only
+        // as a difference between two values that collapse into one would be
+        // visible there and absent from the bytes the run publishes -- which
+        // is a harness reporting on something nobody reads.
+        VALUE_MAP_PERMUTED(
+            CONVERT_UNITS_PERMUTED.out.mapped,
+            ch_baseline_ruleset,
+            packVariablesForMapJson,
+            valueParamsJson,
+        )
+        ch_versions = ch_versions.mix(VALUE_MAP_PERMUTED.out.versions.first())
+
         // ONE invocation over the baseline AND every replicate, mixed into a
         // single channel -- so there is no second call site whose code could
         // differ from the one that digested the run the replicates are
@@ -1330,7 +1419,7 @@ workflow CLINICALHARMONIZE {
         // their baseline invocation is a real pipeline stage that publishes
         // results; this process exists only for the harness, so it does not.)
         ARTEFACT_DIGEST(
-            ch_mapped.mix(CONVERT_UNITS_PERMUTED.out.mapped),
+            ch_mapped.mix(VALUE_MAP_PERMUTED.out.mapped),
             'mapped/',
             ledger_float_precision,
         )
@@ -1391,8 +1480,10 @@ workflow CLINICALHARMONIZE {
     links      = ch_links          // channel: [ val(replicate), path(links.parquet) ] (§3.3; replicate is null for the baseline)
     link_report = ch_link_report   // channel: [ val(replicate), path(link_report.json) ] (§3.3; replicate is null for the baseline)
     confirmed  = ch_confirmed      // channel: [ cohort_id, dataset_id, column, variable, concept_id, rule_id ] (§5.1/§5.2)
-    mapped     = ch_mapped         // channel: [ val(replicate), [path(mapped/*.parquet)] ] (§6.1 mapped, §6.2 converted)
+    mapped     = ch_mapped         // channel: [ val(replicate), [path(mapped/*.parquet)] ] (§6.1 mapped, §6.2 converted, §6.3 value-mapped)
     unit_conversions = ch_unit_conversions // channel: [ val(replicate), path(qc/unit_conversions.json) ] (§6.2)
+    value_collapse   = ch_value_collapse   // channel: [ val(replicate), path(qc/value_collapse.json) ] (§6.3)
+    value_unmapped   = ch_value_unmapped   // channel: [ val(replicate), path(qc/value_unmapped.json) ] (§6.3)
     versions   = ch_versions       // channel: [ path(versions.yml) ]
 }
 

@@ -9,6 +9,7 @@ gitignored `.superpowers/` ledger. See ADR-003's own preamble.
 |---|---|---|
 | [0003](0003-invariant-scope-is-the-proposer.md) | §10.1's harness holds its claim over `ledger.proposed.yaml`, not the whole pipeline | accepted; superseded in part by 0004 |
 | [0004](0004-invariant-scope-widens-to-map.md) | The trigger has fired — §6.1 consumes `link/links.parquet`, so the scope widens to `map` | accepted and implemented |
+| [0005](0005-the-confirmed-ledger-gains-value-map.md) | §6.3 cannot be a §6 change: the confirmed ledger gains an optional `value_map`, because a value collapse is a decision only the gate can make | accepted and implemented |
 
 ADR-001 and ADR-002 are not recorded. They were not found in git or in
 `.superpowers/`, and no code comment cites either, so there is nothing to

@@ -190,3 +190,81 @@ The factor table and `--plausible_range_quantiles` are the BASELINE's on
 every replicate, exactly as the ruleset is. A per-replicate conversion table
 would introduce a second moving part, and a red verdict would no longer say
 which one moved.
+
+## Amendment (§6.3): the last writer of `mapped/` moved again, and so did the digest
+
+`map` still names the artefact list `[ledger.proposed.yaml, mapped/]`, and
+`SCOPE_ARTEFACTS` in `bin/invariant_report.py` is untouched for the second
+time. What changed, again, is what `mapped/` IS. §6.3 applies the confirmed
+value vocabularies (ADR-005) and rewrites the same five tables plus
+`_unmapped.parquet` under the same names, appending `value_as_concept_id` and
+`value_rule_id`, so `results/mapped/` is now `VALUE_MAP`'s output and
+`CONVERT_UNITS`' is an intermediate that is no longer published.
+
+`CONVERT_UNITS` did **not** stop publishing wholesale, unlike `MAP_CONCEPTS`
+before it. It emits two artefacts and only one of them moved: its
+`publishDir` now carries a `saveAs` that drops `mapped/` and keeps
+`qc/unit_conversions.json`, which is §6.2's own OUT slot and has nothing to
+do with §6.3. An `enabled: false` here would have deleted that file from
+`results/` as a side effect of a §6.3 change — the kind of collateral a
+one-line config edit makes invisibly.
+
+The replicate therefore runs one more step again:
+
+```
+    convert units, BASELINE factor table and params  # CONVERT_UNITS_PERMUTED
+    value-map, BASELINE ruleset and params           # VALUE_MAP_PERMUTED — NEW
+    collect a canonical content digest of mapped/    # over the VALUE-MAPPED tables
+```
+
+The §6.2 amendment above wrote down the argument that adding the step was
+unnecessary, because that is the argument this ADR exists to distrust. Here
+it is weaker than it was there, and worth stating in its new form. A unit
+conversion is injective — multiplying by a non-zero factor loses nothing — so
+`n_distinct(converted) == n_distinct(mapped)` and digesting §6.1's output
+really would have been no less sensitive. **A value collapse is not
+injective.** It is many-to-one by definition; that is what `fan_in > 1`
+means. So `n_distinct(value-mapped) <= n_distinct(converted)`, strictly, and
+the two artefacts are genuinely different measurements: a leak that survived
+only as a difference between two source values that collapse into one
+canonical value would be visible in `CONVERT_UNITS`' output and absent from
+`VALUE_MAP`'s.
+
+That cuts both ways, and neither way changes the decision. Digesting the
+earlier artefact would be *more* sensitive — it would catch that leak — but
+it would be reporting on bytes the run does not publish, and a harness whose
+green verdict covers an intermediate is the `[SUCCESS]`-over-an-unmeasured-
+claim this repo has now hit twice. Digesting the published artefact is what
+the scope's own words say (`mapped/`, the directory `results/` carries), and
+the sensitivity that is lost is lost because §6.3 was *asked* to lose it by a
+human at a gate. A leak that only exists between two values a reviewer
+deliberately merged is not a leak the published dataset can express.
+
+The alternative — digest both, and report two verdicts — is a real option and
+is refused here as a scope widening rather than an implementation detail: it
+would mean `map` naming three artefacts, `SCOPE_ARTEFACTS` growing a third
+entry, and every replicate running a second `ARTEFACT_DIGEST`. If §7 or §8
+gives a reason to measure an intermediate, that is the change to make, and it
+needs its own ADR for the same reason this one does.
+
+The ruleset (including its `value_map` rules), `--max_fan_in_warn`,
+`--emit_alluvial` and `--unmapped_value_policy` are the BASELINE's on every
+replicate, exactly as the factor table and the conversion params are. A
+per-replicate collapse would introduce a second moving part and a red verdict
+would no longer say which one moved.
+
+**`implementedScopes` and `SCOPE_ARTEFACTS` were checked and neither
+changed.** `implementedScopes` in `workflows/harmonize.nf` is still
+`['propose', 'map']` and decides which stages RUN per replicate;
+`SCOPE_ARTEFACTS` in `bin/invariant_report.py` is still
+`{"propose": ["ledger"], "map": ["ledger", "mapped"]}` and decides which
+artefacts are HASHED. §6.3 is a part of the `map` stage, not a stage, so
+neither list has a new member to gain — and a scope wired in one but not the
+other is a `[SUCCESS]` over a claim nothing measured.
+
+Cost, measured: the map-scoped invariant test goes **362s → 433s**.
+`VALUE_MAP_PERMUTED` is 100 tasks at a 0.25s mean and 25.1s total in that
+run's own `meta/trace.csv` — the same order as `MAP_CONCEPTS_PERMUTED` and
+`CONVERT_UNITS_PERMUTED`, and two orders below `PROFILE_COLUMNS_PERMUTED`'s
+283.6s. The propose-scoped test is unchanged at 231s, which is the check that
+this widening touched only what it was meant to.

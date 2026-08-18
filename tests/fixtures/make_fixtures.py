@@ -1400,6 +1400,303 @@ def units_missing_factor_factors(target_dir: Path) -> Path:
     return path
 
 
+# ---------------------------------------------------------------------------
+# §6.3 value vocabularies (docs/steps/s6-3.md)
+# ---------------------------------------------------------------------------
+
+# The §6.3 fixture pair's own ledger.proposed.yaml hash, under
+# `--stop_after propose` with default §4 params against values_samplesheet()
+# + values_pack(). Derived empirically by running the pipeline once and
+# hashing the published file -- the same method confirm_ledger_valid(),
+# confirm_ledger_invariant() and confirm_ledger_units() all describe, and
+# for the same reason: §5.1's staleness guard is what stops a ruleset
+# confirmed for other data being applied to this one, so the hash is
+# EVIDENCE, never a value typed to make a gate pass.
+#
+# The pack trap applies here exactly as it does to tests/units.nf.test:
+# nf-test.config sets `profile = "test"` and conf/test.config sets
+# concept_pack to assets/packs/omop_cdm53.yaml, so this hash is only correct
+# for a run that OVERRIDES concept_pack to values_pack(), which every test in
+# tests/value_map.nf.test does.
+_VALUES_FIXTURE_HASH = "sha256:f14681b3f2023c835b3b918f2f8a2b11e8063f59367548297ede09ced8c1f2e9"
+
+
+def values_pack(target_dir: Path) -> Path:
+    """§6.3's own concept pack: two CATEGORICAL variables whose declared
+    value sets are COARSER than the source's, plus the mandatory outcome
+    flag.
+
+    `domain_values` is the load-bearing field here, and its meaning is the
+    one assets/schema_pack.json already gives it: "Enumerated legal values,
+    for nominal/ordinal variables". It is therefore the RIGHT-HAND side of
+    the alluvial plot -- the canonical grain the pipeline harmonizes INTO --
+    and never the source's own grain. A pack that declared 0/1/2/3/4 would
+    be declaring the source's vocabulary as the target's, and there would be
+    nothing for §6.3 to collapse.
+
+    The two variables sit in DIFFERENT pack domains on purpose (observation
+    and person), so they land in two different CDM tables and the fixture
+    exercises §6.3 rewriting more than one mapped table. §6.2's fixture could
+    not: both its analytes are measurements.
+
+    Neither column can be proposed by §4.1's `value_set` generator, and that
+    is a consequence of the paragraph above rather than an accident:
+    ECOG_PS's observed values share nothing with ["0-1", "2+"], and SEX's
+    overlap with ["male", "female", "unknown"] is 2 of 5. Both are proposed
+    by `name_ngram` instead (ECOG_PS/ecog share 2 of 4 trigrams; SEX/sex
+    share all of theirs), which is why the pack variable is named `ecog` and
+    not `performance_status`.
+
+    §10.3 generality: `ecog` and `sex` are neither disease terms, gene
+    symbols nor cohort names, and they live in a TEST fixture rather than in
+    modules/ or workflows/ (Global Constraint 4, whose scope is those
+    directories and bin/).
+    """
+    pack = {
+        "pack": "values-fixture-generic",
+        "version": "0.1.0",
+        "vocabulary": "test-vocab-2026",
+        "variables": [
+            {
+                "name": "ecog",
+                "domain": "observation",
+                "concept_id": 400,
+                "type": "ordinal",
+                "domain_values": ["0-1", "2+"],
+            },
+            {
+                "name": "sex",
+                "domain": "person",
+                "concept_id": 401,
+                "type": "nominal",
+                "domain_values": ["male", "female", "unknown"],
+            },
+            {
+                "name": "study_outcome",
+                "domain": "derived",
+                "derivation": "survival_time",
+                "unit": "day",
+                "outcome": True,
+            },
+        ],
+    }
+    path = target_dir / "values_pack.yaml"
+    path.write_text(yaml.safe_dump(pack, sort_keys=False, default_flow_style=False))
+    return path
+
+
+# The fixture's own value tallies, written once here and read by both the
+# table builder and the ledger below. A test that asserts n_rows == 55 is
+# asserting against THIS list, not against a number typed twice.
+_VALUES_ECOG_TALLY = [("0", 30), ("1", 25), ("2", 20), ("3", 15), ("4", 10), ("9", 20)]
+_VALUES_SEX_CYCLE = ["M", "MALE", "F", "FEMALE", "U"]
+_VALUES_N_ROWS = sum(count for _, count in _VALUES_ECOG_TALLY)
+
+
+def values_fixture_table(target_dir: Path) -> Path:
+    """One hundred and twenty rows over two categorical columns, with one
+    source value that no collapse group claims.
+
+    Three things the value distribution is built to make assertable:
+
+      * the two collapse groups on ECOG_PS have DIFFERENT widths (2 and 3)
+        and DIFFERENT row counts (55 and 45), so a plot that drew every
+        ribbon the same width, or a qc entry that reported a constant, would
+        be visible rather than plausible;
+      * "9" is claimed by no group, which is what --unmapped_value_policy
+        has to do something about. It is 20 of 120 rows -- a fifth, not a
+        rounding error, because a policy tested on one row could be
+        satisfied by an off-by-one;
+      * SEX collapses two spellings each into `male` and `female` and ONE
+        into `unknown`, so the fixture carries a fan_in of 1. The card's
+        nogo is "Do not collapse a value set without writing its fan_in",
+        and a fixture whose every group had fan_in > 1 could not tell a
+        stage that writes fan_in from one that writes it only when
+        something was lost.
+
+    STUDY_OUTCOME carries no rule by construction -- it is the
+    outcome-flagged variable's own name and §4.1 refuses to propose it -- so
+    its values reach mapped/_unmapped.parquet and every run over this
+    fixture holds --max_unmapped_frac above the 0.2 default, exactly as
+    §6.2's fixture does.
+    """
+    ecog = [value for value, count in _VALUES_ECOG_TALLY for _ in range(count)]
+    assert len(ecog) == _VALUES_N_ROWS
+    rows = [["ECOG_PS", "SEX", "STUDY_OUTCOME"]]
+    for i, grade in enumerate(ecog):
+        rows.append(
+            [
+                grade,
+                _VALUES_SEX_CYCLE[i % len(_VALUES_SEX_CYCLE)],
+                str(round(5.0 + (i % 12) * 2.5, 1)),
+            ]
+        )
+    path = target_dir / "tables" / "values_fixture.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(",".join(r) for r in rows) + "\n")
+    return path
+
+
+def values_samplesheet(target_dir: Path) -> Path:
+    """Points --input at values_fixture_table(); pair with --concept_pack
+    values_pack()."""
+    table = values_fixture_table(target_dir)
+    rows = [
+        "cohort_id,dataset_id,role,path,holdout",
+        f"COHORT_VALUES,values_test,clinical,{table},false",
+    ]
+    path = target_dir / "values_samplesheet.csv"
+    path.write_text("\n".join(rows) + "\n")
+    return path
+
+
+def _values_ledger_rows(ecog_value_map: list[dict], sex_value_map: list[dict]) -> list[dict]:
+    """The two confirmed rows, parameterised by their value_map blocks so the
+    valid ledger and its two deliberately-broken variants differ in exactly
+    the field under test and in nothing else."""
+    return [
+        {
+            "cohort_id": "COHORT_VALUES",
+            "dataset_id": "values_test",
+            "column": "ECOG_PS",
+            "decision": "accept",
+            "variable": "ecog",
+            "concept_id": 400,
+            "confirmed_by": "a.reviewer",
+            "rationale": "header names the ECOG performance-status scale and the value set is 0-4 plus an unknown code",
+            "proposed_hash": _VALUES_FIXTURE_HASH,
+            "value_map": ecog_value_map,
+        },
+        {
+            "cohort_id": "COHORT_VALUES",
+            "dataset_id": "values_test",
+            "column": "SEX",
+            "decision": "accept",
+            "variable": "sex",
+            "concept_id": 401,
+            "confirmed_by": "a.reviewer",
+            "rationale": "single-letter and spelled-out codes for the same three categories",
+            "proposed_hash": _VALUES_FIXTURE_HASH,
+            "value_map": sex_value_map,
+        },
+    ]
+
+
+def confirm_ledger_values(target_dir: Path) -> Path:
+    """The human gate for the §6.3 fixture: five collapse groups across two
+    columns, each with the concept id the reviewer assigned to the canonical
+    value and the reason they assigned it.
+
+    `concept_id` on a value_map group is the VALUE's standard concept, not
+    the column's -- the column's is the row-level `concept_id` above, which
+    §6.1 already writes into <domain>_concept_id. The pack declares 0 for
+    neither, so a human supplies both at the gate, which is what §5.1 is
+    for (the same reasoning confirm_ledger_invariant()'s own comment gives
+    for its concept ids).
+
+    Every group carries a rationale because --require_rationale is true by
+    default and a collapse is the harmonization decision the whole card is
+    about: "four source grades collapsing into two canonical ones is
+    sometimes correct and sometimes the destruction of the effect being
+    studied", and the rationale is the only place the reviewer says which
+    they believe this is.
+
+    ECOG "9" is claimed by NO group, deliberately. It is the fixture's
+    --unmapped_value_policy case.
+    """
+    ecog = [
+        {
+            "from": ["0", "1"],
+            "to": "0-1",
+            "concept_id": 4000,
+            "rationale": "fully ambulatory; the trial's own stratum boundary sits between 1 and 2",
+        },
+        {
+            "from": ["2", "3", "4"],
+            "to": "2+",
+            "concept_id": 4001,
+            "rationale": "restricted activity or worse; pooled because no cohort here recorded 3 and 4 separably",
+        },
+    ]
+    sex = [
+        {
+            "from": ["M", "MALE"],
+            "to": "male",
+            "concept_id": 4500,
+            "rationale": "two spellings of one recorded category",
+        },
+        {
+            "from": ["F", "FEMALE"],
+            "to": "female",
+            "concept_id": 4501,
+            "rationale": "two spellings of one recorded category",
+        },
+        {
+            "from": ["U"],
+            "to": "unknown",
+            "concept_id": 4502,
+            "rationale": "the source's own not-recorded code; kept as its own category rather than dropped",
+        },
+    ]
+    path = target_dir / "confirm_ledger_values.yaml"
+    path.write_text(yaml.safe_dump(_values_ledger_rows(ecog, sex), sort_keys=False, default_flow_style=False))
+    return path
+
+
+def confirm_ledger_values_ambiguous(target_dir: Path) -> Path:
+    """The same ledger with "1" claimed by BOTH ECOG groups.
+
+    Which group applies is then a question the file does not answer, and a
+    mapper that picked one would be making the harmonization decision §5.1
+    exists to keep out of the pipeline. §5.1 refuses it at parse time, so
+    the run stops before a single value is written -- the same shape as
+    §6.2's duplicate-factor refusal, and for the same reason: a table
+    carrying two answers to one question is ambiguous whether or not the two
+    answers agree.
+    """
+    ecog = [
+        {"from": ["0", "1"], "to": "0-1", "concept_id": 4000, "rationale": "fully ambulatory"},
+        {"from": ["1", "2", "3", "4"], "to": "2+", "concept_id": 4001, "rationale": "restricted activity or worse"},
+    ]
+    sex = [
+        {"from": ["M", "MALE"], "to": "male", "concept_id": 4500, "rationale": "two spellings of one category"},
+        {"from": ["F", "FEMALE"], "to": "female", "concept_id": 4501, "rationale": "two spellings of one category"},
+        {"from": ["U"], "to": "unknown", "concept_id": 4502, "rationale": "the source's own not-recorded code"},
+    ]
+    path = target_dir / "confirm_ledger_values_ambiguous.yaml"
+    path.write_text(yaml.safe_dump(_values_ledger_rows(ecog, sex), sort_keys=False, default_flow_style=False))
+    return path
+
+
+def confirm_ledger_values_undeclared(target_dir: Path) -> Path:
+    """The same ledger collapsing ECOG into "0-4", which values_pack() does
+    not declare.
+
+    The pack IS the target variable set, and `domain_values` is the pack's
+    own word for a variable's "enumerated legal values"
+    (assets/schema_pack.json). A canonical value invented at the gate is a
+    target vocabulary the pack never declared, which is the value-level form
+    of §6.2's nogo ("Never convert to a unit the pack does not declare").
+    §6.3 refuses it.
+    """
+    ecog = [
+        {
+            "from": ["0", "1", "2", "3", "4"],
+            "to": "0-4",
+            "concept_id": 4000,
+            "rationale": "collapses the whole scale into one grade the pack never declared",
+        },
+    ]
+    sex = [
+        {"from": ["M", "MALE"], "to": "male", "concept_id": 4500, "rationale": "two spellings of one category"},
+        {"from": ["F", "FEMALE"], "to": "female", "concept_id": 4501, "rationale": "two spellings of one category"},
+        {"from": ["U"], "to": "unknown", "concept_id": 4502, "rationale": "the source's own not-recorded code"},
+    ]
+    path = target_dir / "confirm_ledger_values_undeclared.yaml"
+    path.write_text(yaml.safe_dump(_values_ledger_rows(ecog, sex), sort_keys=False, default_flow_style=False))
+    return path
+
+
 FIXTURES = [
     valid_samplesheet,
     duplicate_samplesheet,
@@ -1434,6 +1731,11 @@ FIXTURES = [
     confirm_ledger_units,
     units_analyte_blind_factors,
     units_missing_factor_factors,
+    values_pack,
+    values_samplesheet,
+    confirm_ledger_values,
+    confirm_ledger_values_ambiguous,
+    confirm_ledger_values_undeclared,
 ]
 
 

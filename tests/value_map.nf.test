@@ -1,0 +1,523 @@
+// §6.3 — map value vocabularies, and show every collapse.
+//
+// The card's own done-when (docs/steps/s6-3.md) is two commands:
+//
+//     nextflow run . -profile test,docker --stop_after map
+//     jq -e '[.[] | select(.fan_in > 1)] | length >= 0' results/qc/value_collapse.json
+//
+// That `jq` is `>= 0`, which is vacuously true of the empty list, of a file
+// with no fan_in key at all, and of a stage that recorded nothing. It is NOT
+// the test. The card's prose is what the test has to be: "Every collapse in
+// the fixture appears with its fan-in and an alluvial plot exists." So the
+// fixture below collapses something real (five groups across two columns and
+// two CDM tables, one of them a fan_in of 1), and test 1 asserts every one of
+// those collapses back out of qc/value_collapse.json by name, width and row
+// count.
+//
+// The other six tests are not padding, for the reason §6.2's four extra
+// tests are not: a done-when that exercises one path passes against a stage
+// that does one thing. Tests 2-4 are the three params whose effect column
+// makes a claim (--max_fan_in_warn, --unmapped_value_policy, --emit_alluvial),
+// test 5 is the OUT slot's first clause (value_as_concept_id actually set on
+// the rows), and tests 6-7 are the two refusals -- one in §5.1's gate, one in
+// §6.3 itself.
+//
+// The alluvial plot is asserted OFF THE IMAGE, not by existence. That shape
+// is copied from tests/link_score.nf.test's histogram assertion and
+// bin/link_resolve.py's published pixel geometry, for the reason §3.3 gives:
+// "the plot exists" is not an assertion anyone re-checks, and the card's own
+// nogo ("Never suppress the alluvial plot because the collapse looked
+// obvious") is unenforceable against a check that never looks at the pixels.
+//
+// The pack trap applies to every run below. nf-test.config sets
+// `profile = "test"` and conf/test.config sets concept_pack to
+// assets/packs/omop_cdm53.yaml, so concept_pack is overridden EXPLICITLY
+// everywhere; without it the ledger's proposed_hash is checked against a
+// proposal set derived from a different pack and CONFIRM_LEDGER rejects the
+// whole file, correctly.
+//
+// max_unmapped_frac is raised on every run for the reason tests/units.nf.test
+// raises it: STUDY_OUTCOME carries no rule by construction (§4.1 refuses to
+// propose an outcome-flagged column), so one of the fixture's three columns
+// reaches mapped/_unmapped.parquet on every run. That is §6.1's gate, tested
+// there; a firing here would say nothing about value vocabularies.
+//
+// Run once before this test:
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/value_map.nf.test
+
+nextflow_pipeline {
+
+    name "§6.3 — map value vocabularies, and show every collapse"
+    script "../main.nf"
+    tag "pipeline"
+    tag "map"
+    tag "values"
+
+    test("every collapse in the fixture appears with its fan-in, and an alluvial plot exists (§6.3 done-when)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/values_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/values_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_values.yaml"
+                max_unmapped_frac = 0.6
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def collapse = new groovy.json.JsonSlurper()
+                .parse(file("${params.outdir}/qc/value_collapse.json"))
+
+            assertAll(
+                {
+                    // The Contract's own keys, on EVERY entry. fan_in first,
+                    // because the nogo is "Do not collapse a value set
+                    // without writing its fan_in" and an entry that omits it
+                    // on the trivial cases is exactly the failure that nogo
+                    // names.
+                    assert collapse.size() == 5 :
+                        "expected one entry per collapse group, got ${collapse.size()}"
+                    collapse.each { entry ->
+                        ['rule_id', 'variable', 'from', 'to', 'n_rows', 'fan_in'].each { key ->
+                            assert entry.containsKey(key) :
+                                "qc/value_collapse.json entry has no ${key}; the Contract names it"
+                        }
+                        assert entry.fan_in == entry.from.size() :
+                            "fan_in ${entry.fan_in} disagrees with |from| ${entry.from.size()} -- " +
+                            "fan_in is len(from) by definition, never an independently maintained number"
+                    }
+                },
+                {
+                    // Every collapse the fixture actually performs, by name,
+                    // width and row count. tests/fixtures/make_fixtures.py's
+                    // _VALUES_ECOG_TALLY is where these numbers come from:
+                    // 30+25 = 55 rows collapse two grades into "0-1", and
+                    // 20+15+10 = 45 rows collapse three into "2+".
+                    def byKey = collapse.collectEntries { [("${it.variable}/${it.to}" as String): it] }
+                    assert byKey.keySet() == [
+                        'ecog/0-1', 'ecog/2+', 'sex/male', 'sex/female', 'sex/unknown'
+                    ] as Set : "collapse groups recorded: ${byKey.keySet()}"
+
+                    assert byKey['ecog/0-1'].from == ['0', '1']
+                    assert byKey['ecog/0-1'].fan_in == 2
+                    assert byKey['ecog/0-1'].n_rows == 55
+
+                    assert byKey['ecog/2+'].from == ['2', '3', '4']
+                    assert byKey['ecog/2+'].fan_in == 3
+                    assert byKey['ecog/2+'].n_rows == 45
+
+                    assert byKey['sex/male'].from == ['M', 'MALE']
+                    assert byKey['sex/male'].n_rows == 48
+                    assert byKey['sex/female'].from == ['F', 'FEMALE']
+                    assert byKey['sex/female'].n_rows == 48
+
+                    // The fan_in of ONE. "fan_in > 1 is a lost distinction,
+                    // by definition" says what a wide collapse means; it
+                    // does not license omitting the field when nothing was
+                    // lost, and a stage that only wrote fan_in for lossy
+                    // groups would pass the card's own jq unchanged.
+                    assert byKey['sex/unknown'].from == ['U']
+                    assert byKey['sex/unknown'].fan_in == 1
+                    assert byKey['sex/unknown'].n_rows == 24
+                },
+                {
+                    // The card's jq, with the vacuity removed. `>= 0` is true
+                    // of the empty list; the claim worth checking is that the
+                    // fixture's lossy collapses are actually here.
+                    assert collapse.findAll { it.fan_in > 1 }.size() == 4
+                },
+                {
+                    // "qc/alluvial_<variable>.png" -- one per variable, so a
+                    // single plot covering everything would fail here.
+                    ['ecog', 'sex'].each { variable ->
+                        def png = file("${params.outdir}/qc/alluvial_${variable}.png")
+                        assert png.exists() && png.size() > 0 :
+                            "no qc/alluvial_${variable}.png"
+                    }
+                },
+                {
+                    // The plot, read back off the pixels. Each entry
+                    // publishes where its own ribbon was drawn, so "an
+                    // alluvial plot exists" becomes a claim about the image
+                    // rather than about the filesystem.
+                    collapse.each { entry ->
+                        def png = file("${params.outdir}/qc/alluvial_${entry.variable}.png")
+                        def image = javax.imageio.ImageIO.read(png)
+                        def meta = entry.alluvial
+                        assert meta.emitted : "alluvial for ${entry.variable} reports emitted=false on a default run"
+                        assert image.width == meta.width && image.height == meta.height
+                        def expected = ((meta.rgb[0] as int) << 16) | ((meta.rgb[1] as int) << 8) | (meta.rgb[2] as int)
+
+                        // Ribbon width = n_rows: the band this group occupies
+                        // on the right is proportional to its row count, so
+                        // the two 48-row sex groups are equal and the 24-row
+                        // one is half of either.
+                        def targetHeight = (meta.target_band.bottom_px_y as int) - (meta.target_band.top_px_y as int)
+                        assert targetHeight > 0 : "${entry.variable}/${entry.to} drew a zero-height ribbon"
+
+                        // Left edge: every source value in this group has its
+                        // own band, and the ribbon leaves all of them.
+                        assert meta.source_bands*.value == entry.from :
+                            "the plot's source bands ${meta.source_bands*.value} are not this group's from list ${entry.from}"
+                        meta.source_bands.each { band ->
+                            def y = (((band.top_px_y as int) + (band.bottom_px_y as int)) / 2) as int
+                            def pixel = image.getRGB((meta.left_x_px as int) + 2, y) & 0xFFFFFF
+                            assert pixel == expected :
+                                "no ribbon for ${entry.variable} '${band.value}' at the left edge"
+                        }
+
+                        // Right edge: the canonical node the ribbon arrives at.
+                        def ty = (((meta.target_band.top_px_y as int) + (meta.target_band.bottom_px_y as int)) / 2) as int
+                        def rightPixel = image.getRGB((meta.right_x_px as int) - 2, ty) & 0xFFFFFF
+                        assert rightPixel == expected :
+                            "no ribbon arriving at ${entry.variable}/${entry.to} on the right"
+                    }
+                },
+                {
+                    // One colour per group, or the picture answers none of
+                    // the question it exists for -- which of four source
+                    // grades became which canonical one.
+                    ['ecog', 'sex'].each { variable ->
+                        def rgbs = collapse.findAll { it.variable == variable }*.alluvial*.rgb
+                        assert rgbs.toSet().size() == rgbs.size() :
+                            "${variable}'s collapse groups share a ribbon colour"
+                    }
+                },
+            )
+        }
+    }
+
+    test("value_as_concept_id is set on the mapped rows, and the collapse is visible in mapped/ (§6.3 OUT)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/values_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/values_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_values.yaml"
+                max_unmapped_frac = 0.6
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def read = { path ->
+                def proc = ['python3', "${projectDir}/tests/fixtures/read_mapped.py", path].execute()
+                def out = new StringBuilder(), err = new StringBuilder()
+                proc.waitForProcessOutput(out, err)
+                assert proc.exitValue() == 0 : "could not read ${path}: ${err}"
+                new groovy.json.JsonSlurper().parseText(out.toString())
+            }
+
+            def observation = read("${params.outdir}/mapped/observation.parquet")
+            def person = read("${params.outdir}/mapped/person.parquet")
+
+            assertAll(
+                {
+                    assert observation.columns.contains('value_as_concept_id')
+                    assert observation.columns.contains('value_rule_id')
+                    assert person.columns.contains('value_as_concept_id')
+                },
+                {
+                    // "same rows" -- the collapse rewrites a column, it never
+                    // drops or merges rows. 120 in, 120 out, on both tables.
+                    assert observation.rows.size() == 120
+                    assert person.rows.size() == 120
+                },
+                {
+                    // The collapse itself: two source grades now carry ONE
+                    // value_as_concept_id, and three carry another. This is
+                    // the lost distinction the card is about, and it is only
+                    // a collapse if the artefact actually shows it.
+                    def byGrade = observation.rows.groupBy { it.observation_source_value }
+                    assert byGrade['0']*.value_as_concept_id.toSet() == [4000] as Set
+                    assert byGrade['1']*.value_as_concept_id.toSet() == [4000] as Set
+                    assert byGrade['2']*.value_as_concept_id.toSet() == [4001] as Set
+                    assert byGrade['3']*.value_as_concept_id.toSet() == [4001] as Set
+                    assert byGrade['4']*.value_as_concept_id.toSet() == [4001] as Set
+                },
+                {
+                    // The source value is NOT rewritten. The card's
+                    // Alternatives table rejects "emit both raw and
+                    // canonical columns" as a design, and §6.1 already keeps
+                    // the verbatim source string -- a mapper that overwrote
+                    // it would delete the only record of what the cohort
+                    // reported and make the collapse irreversible in fact as
+                    // well as in meaning.
+                    assert observation.rows*.observation_source_value.toSet() ==
+                        ['0', '1', '2', '3', '4', '9'] as Set
+                },
+                {
+                    // A value no group claims gets a NULL, never a 0. Zero is
+                    // OMOP's "no matching concept" and would be a claim about
+                    // a value that was never looked up.
+                    def nine = observation.rows.findAll { it.observation_source_value == '9' }
+                    assert nine.size() == 20
+                    assert nine.every { it.value_as_concept_id == null }
+                    assert nine.every { it.value_rule_id == null }
+                },
+                {
+                    // Provenance: §5.2's Why is that "every emitted cell name
+                    // the rule that produced it", and §6.3 writes a cell. The
+                    // value_map rule that set it is named on the row, not
+                    // left to be re-derived by re-running the match.
+                    def collapse = new groovy.json.JsonSlurper()
+                        .parse(file("${params.outdir}/qc/value_collapse.json"))
+                    def ruleFor = collapse.collectEntries { [(it.to): it.rule_id] }
+                    def zeros = observation.rows.findAll { it.observation_source_value == '0' }
+                    assert zeros.every { it.value_rule_id == ruleFor['0-1'] }
+                },
+                {
+                    // The other table, and the other variable: two spellings
+                    // of one category, one concept id.
+                    def bySex = person.rows.groupBy { it.person_source_value }
+                    assert bySex['M']*.value_as_concept_id.toSet() == [4500] as Set
+                    assert bySex['MALE']*.value_as_concept_id.toSet() == [4500] as Set
+                    assert bySex['U']*.value_as_concept_id.toSet() == [4502] as Set
+                },
+                {
+                    // The ruleset carries the value_map rules §5.2 compiled,
+                    // beside the column_map rules it already did. The kind
+                    // §5.2's Contract enumerated is now emitted rather than
+                    // only anticipated.
+                    def ruleset = new groovy.json.JsonSlurper()
+                        .parse(file("${params.outdir}/rules/ruleset.json"))
+                    assert ruleset.findAll { it.kind == 'value_map' }.size() == 5
+                    assert ruleset.findAll { it.kind == 'column_map' }.size() == 2
+                    assert ruleset*.rule_id.toSet().size() == ruleset.size() :
+                        "two rules share a rule_id"
+                },
+            )
+        }
+    }
+
+    test("--max_fan_in_warn flags a collapse wider than itself, and the default does not") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/values_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/values_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_values.yaml"
+                max_unmapped_frac = 0.6
+                // The fixture's widest collapse is three grades into "2+".
+                // Under the default of 3 it is not wider than the threshold
+                // and is not flagged -- test 1 above is green with it in the
+                // file. At 2 the same data is flagged, so the param is
+                // demonstrated rather than asserted.
+                max_fan_in_warn   = 2
+            }
+        }
+
+        then {
+            assert workflow.success
+            def collapse = new groovy.json.JsonSlurper()
+                .parse(file("${params.outdir}/qc/value_collapse.json"))
+            def flagged = collapse.findAll { it.flag == 'wide_collapse' }
+            assertAll(
+                {
+                    assert flagged.size() == 1 :
+                        "--max_fan_in_warn 2 flagged ${flagged.size()} collapse(s); only the 3-wide one qualifies"
+                    assert flagged[0].to == '2+'
+                    assert flagged[0].fan_in == 3
+                },
+                {
+                    // The threshold the entry was judged against travels with
+                    // the verdict, the way §6.2's range_check carries its own
+                    // quantiles: an entry read on its own says what it was
+                    // compared to.
+                    assert collapse.every { it.max_fan_in_warn == 2 }
+                },
+                {
+                    // Flagged, not fatal. The param's effect column says a
+                    // wide collapse "is flagged in the QC report" -- it names
+                    // no exit code, and inventing one would stop runs the
+                    // card does not ask to stop.
+                    assert workflow.success
+                },
+            )
+        }
+    }
+
+    test("--unmapped_value_policy: manifest records the unmappable value, fail stops the run") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/values_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/values_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_values.yaml"
+                max_unmapped_frac = 0.6
+                unmapped_value_policy = "fail"
+            }
+        }
+
+        then {
+            // ECOG "9" is claimed by no collapse group. Under `fail` that is
+            // an exit code: a value in a column the ledger DID value-map,
+            // which no group accounts for, is a gap in the human's own
+            // decision rather than a datum with nowhere to go.
+            assert workflow.failed :
+                "--unmapped_value_policy fail let a value no collapse group claims through"
+            def report = workflow.errorReport ?: workflow.stdout.join('\n')
+            assertAll(
+                { assert report.contains('ECOG_PS') : "the refusal does not name the column" },
+                { assert report.contains('ecog') : "the refusal does not name the variable" },
+                { assert report.contains('9') : "the refusal does not name the value it could not map" },
+            )
+        }
+    }
+
+    test("--unmapped_value_policy manifest is the default, and the manifest is written even so") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/values_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/values_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_values.yaml"
+                max_unmapped_frac = 0.6
+            }
+        }
+
+        then {
+            assert workflow.success
+            def unmapped = new groovy.json.JsonSlurper()
+                .parse(file("${params.outdir}/qc/value_unmapped.json"))
+            assertAll(
+                {
+                    assert unmapped.size() == 1 :
+                        "expected one unmappable value, got ${unmapped*.source_value}"
+                    assert unmapped[0].source_value == '9'
+                    assert unmapped[0].column == 'ECOG_PS'
+                    assert unmapped[0].variable == 'ecog'
+                    assert unmapped[0].cohort_id == 'COHORT_VALUES'
+                    assert unmapped[0].dataset_id == 'values_test'
+                    assert unmapped[0].n_rows == 20
+                },
+                {
+                    // `manifest` is the default, so a run that says nothing
+                    // about the policy still records what it could not map.
+                    // The alternative -- writing the file only when the
+                    // policy is set explicitly -- makes "nothing was
+                    // unmappable" and "nobody asked" the same observation.
+                    assert file("${params.outdir}/qc/value_unmapped.json").exists()
+                },
+            )
+        }
+    }
+
+    test("--emit_alluvial false suppresses the plot and SAYS SO, rather than silently omitting it") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/values_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/values_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_values.yaml"
+                max_unmapped_frac = 0.6
+                emit_alluvial     = false
+            }
+        }
+
+        then {
+            assert workflow.success
+            def collapse = new groovy.json.JsonSlurper()
+                .parse(file("${params.outdir}/qc/value_collapse.json"))
+            assertAll(
+                {
+                    assert !file("${params.outdir}/qc/alluvial_ecog.png").exists()
+                    assert !file("${params.outdir}/qc/alluvial_sex.png").exists()
+                },
+                {
+                    // The nogo is "Never suppress the alluvial plot because
+                    // the collapse looked obvious" -- it forbids the CODE
+                    // deciding, not the operator. An operator who turns the
+                    // plot off gets that recorded on every entry, so a
+                    // missing PNG is never mistaken for a stage that failed
+                    // to draw one.
+                    assert collapse.every { it.alluvial.emitted == false }
+                    assert collapse.every { (it.alluvial.reason ?: '').contains('emit_alluvial') }
+                },
+                {
+                    // Everything else the card asks for is still recorded.
+                    // The plot is one of three OUT artefacts, not the gate on
+                    // the other two.
+                    assert collapse.size() == 5
+                    assert collapse.every { it.containsKey('fan_in') }
+                },
+            )
+        }
+    }
+
+    test("a value claimed by two collapse groups is refused at the gate (§5.1)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/values_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/values_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_values_ambiguous.yaml"
+                max_unmapped_frac = 0.6
+            }
+        }
+
+        then {
+            // "1" is in both ECOG groups. A mapper that picked one would be
+            // making the harmonization decision §5.1 exists to keep out of
+            // the pipeline, and it would pick it silently. Refused at parse
+            // time, before any value is written.
+            assert workflow.failed :
+                "a value claimed by two collapse groups produced a green run"
+            def report = workflow.errorReport ?: workflow.stdout.join('\n')
+            assertAll(
+                { assert report.contains('ECOG_PS') },
+                { assert report.contains('0-1') && report.contains('2+') :
+                    "the refusal does not name BOTH groups that claim the value" },
+            )
+        }
+    }
+
+    test("a canonical value the pack does not declare is refused (§6.3)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/values_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/values_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_values_undeclared.yaml"
+                max_unmapped_frac = 0.6
+            }
+        }
+
+        then {
+            // values_pack() declares ecog's domain_values as ["0-1", "2+"];
+            // this ledger collapses the scale into "0-4". The pack IS the
+            // target variable set and domain_values is its own word for a
+            // variable's "enumerated legal values", so a canonical value
+            // invented at the gate is a target vocabulary nothing declared --
+            // the value-level form of §6.2's "never convert to a unit the
+            // pack does not declare".
+            assert workflow.failed :
+                "a collapse target the pack never declared produced a green run"
+            def report = workflow.errorReport ?: workflow.stdout.join('\n')
+            assertAll(
+                { assert report.contains('0-4') : "the refusal does not name the undeclared value" },
+                { assert report.contains('ecog') : "the refusal does not name the variable" },
+            )
+        }
+    }
+}

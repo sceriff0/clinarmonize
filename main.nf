@@ -99,6 +99,9 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
         params.unit_conversion_table,
         params.fail_on_implausible_range,
         params.plausible_range_quantiles,
+        params.max_fan_in_warn,
+        params.emit_alluvial,
+        params.unmapped_value_policy,
         params.outdir,
     )
     emit:
