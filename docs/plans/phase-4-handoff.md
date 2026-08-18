@@ -6,21 +6,52 @@ wiring, which was blocked on two things that no longer exist
 did not exist). **§6.3 is still not started**, and its blocker is a §5
 contract change rather than a §6 one — see "What is not done" below.
 
-**One blocking caveat, stated up front, and it is the same one phase 3
-carried.** Nothing in this phase has been executed under a container. This
-change adds a **fifteenth** `modules/local/*/environment.yml` (verified
-byte-identical to `containers/duckdb-pyyaml/environment.yml`, as all fifteen
-now are) and `bin/convert_units.py`, which is **the first script in this repo
-to import both `duckdb` and `pyyaml` in one interpreter**. On the host that is
-incidental; in the container it is a claim about the image. So
-`sbatch tools/verify_clinarmonize.sh` has to run against `290b3dd` before
-Global Constraint 6 can be claimed for this tree. Docker on this machine still
-hangs on `--platform linux/amd64`; nothing about that changed.
+**The container run happened, and it did not cover this phase.** SLURM
+6505317 passed under singularity against `bb35174` — 15 module
+`environment.yml` copies matching, the pinned image resolving, the parquet
+round-trip clean, `git dirty: no`. It ran **48 of 61 tests**, and
+`tests/units.nf.test` was not among them.
+
+`tools/verify_clinarmonize.sh` selected tests from two hand-maintained file
+lists, and `link_score.nf.test`, `map_concepts.nf.test` and `units.nf.test`
+were in neither. The report said `ALL REQUESTED TESTS PASSED`; the word
+carrying it was *REQUESTED*. Fixed in `5e0c6fa` — the fast chunk is now every
+`tests/*.nf.test` on disk minus the two slow ones, so a new file is IN by
+default, and the verdict names its own scope.
+
+**So Global Constraint 6 is NOT claimable for §6.2, §6.1 or §3.** Not because
+anything failed, but because nothing ran. That is also retroactive: phases 2
+and 3 recorded F2 as clean on runs that silently declined to execute the code
+those phases added. **Re-run `sbatch tools/verify_clinarmonize.sh` against
+`5e0c6fa` or later**; the first full-coverage run in this repo's history will
+be the one that either discharges the constraint or finds three phases' worth
+of container-only defects at once. `bin/convert_units.py` is the first script
+here importing both `duckdb` and `pyyaml` in one interpreter, and it has never
+been inside the image.
+
+**What that run already fixed on the way.** Jobs 6501142 and 6502426 died
+`FAILED 1:0` after 9s with an empty stderr and a `report.txt` ending at
+`=== conda ===`. A site `~/.bashrc` that runs `set -u` leaves it active for
+the rest of the script, and the next line — `eval "$(conda shell.bash hook)"`
+— dereferences variables conda's init leaves unset. `|| true` catches a
+non-zero *return*; `set -u` makes the shell *exit*, which `||` cannot catch,
+and `2>/dev/null` swallowed the diagnostic. `bb35174` neutralises inherited
+options (`set +e +u +o pipefail`) immediately after the source. Note that
+`bash -c 'source ~/.bashrc; echo SURVIVED'` prints SURVIVED either way — that
+test only ever proved `.bashrc` does not `exit`, and treating it as a
+refutation of `set -u` cost three hypotheses.
 
 ## State
 
-* Branch `main`, HEAD `290b3dd`. Still **not pushed**; no PR has ever been
-  opened.
+* Branch `main`, HEAD `5e0c6fa`, **pushed** to
+  `github.com/sceriff0/clinarmonize`. This phase is the first to push:
+  `origin/main` had been sitting at `37e7c2b` (mid-phase-0), so the push
+  carried phases 1-4 across in one go. **No PR has ever been opened**, and
+  opening one is what first fires `linting.yml` and `nf-test.yml` (both are
+  `pull_request`/`release` only) -- including the known-red nf-core/tools
+  4.1.0 crash below. Pushing to `main` fires no CI at all.
+* §6.2 itself is `290b3dd`; `bb35174` and `5e0c6fa` are the two verification
+  harness fixes the cluster run produced.
 * **Suite: 61/61 green** under `-profile test` on the host, 1075s (56 at the
   end of phase 3). The five new tests are all in `tests/units.nf.test`.
 * Local runs need **`export NXF_VER=26.04.6`**. Unchanged from phase 3, and
