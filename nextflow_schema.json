@@ -408,6 +408,35 @@
                     "help_text": "Retains the pre-translation concept; turning it off breaks --audit (§6.1). The column is removed entirely rather than nulled, so a run without it cannot be mistaken for one whose lookups all failed.",
                     "fa_icon": "fas fa-undo"
                 },
+                "unit_conversion_table": {
+                    "type": "string",
+                    "format": "file-path",
+                    "default": "assets/ucum_factors.yaml",
+                    "description": "Analyte-aware unit conversion factors.",
+                    "help_text": "Analyte-aware factors; the only source of conversions (\u00a76.2). Every row is keyed on (analyte, from, to) because there is no universal mg/dL -> mmol/L factor: it is molar-mass specific, so a table keyed on the unit pair alone is wrong for every analyte but one and its values are indistinguishable from real biological variation. A missing factor fails the run; it is never defaulted to 1.0.",
+                    "fa_icon": "fas fa-balance-scale"
+                },
+                "fail_on_implausible_range": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "A converted distribution outside the pack range stops the run.",
+                    "help_text": "A converted distribution outside the pack range stops the run (\u00a76.2). False demotes it to a recorded qc flag (`implausible_after_conversion` in qc/unit_conversions.json) and never suppresses the check or its verdict -- the escape hatch is for proceeding despite the finding, never for hiding it.",
+                    "fa_icon": "fas fa-exclamation-triangle"
+                },
+                "plausible_range_quantiles": {
+                    "type": "array",
+                    "items": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0
+                    },
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "default": [0.01, 0.99],
+                    "description": "Quantiles the plausible-range post-condition is evaluated at.",
+                    "help_text": "Which quantiles the range check uses, so outliers alone cannot fail it (\u00a76.2). Evaluated over CONVERTED values, per pack variable across every rule that writes it. Widening to [0.0, 1.0] makes a single transcription error fail the run; narrowing further hides more of the tail.",
+                    "fa_icon": "fas fa-percentage"
+                },
                 "generality_terms": {
                     "type": "string",
                     "default": "assets/forbidden_terms.txt",

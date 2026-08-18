@@ -1,0 +1,313 @@
+// §6.2 — convert units through UCUM, refusing ambiguity.
+//
+// The card's own done-when (docs/steps/s6-2.md):
+//
+//     nf-test test tests/units.nf.test
+//
+//     A creatinine column converted with the glucose factor trips
+//     implausible_after_conversion and fails the run.
+//
+// That last sentence is test 2 below, and it is the only one of these five
+// the card names. The other four are here because a done-when that only
+// exercises the FAILURE path would pass against a stage that fails every
+// run: test 1 is the conversion actually happening with the right factor,
+// tests 3 and 4 are the two params whose effect column makes a claim
+// (--fail_on_implausible_range, --plausible_range_quantiles), and test 5 is
+// the SIDE clause's other half ("an ambiguous or MISSING conversion
+// factor").
+//
+// Why this file does not use `-profile test` literally, restated from
+// tests/map_concepts.nf.test because it applies identically: §5.1's human
+// gate refuses to pass 'confirm' without a real --confirmed_ledger under
+// every profile, and 'map' sits after 'confirm' in §0.9's graph. So the
+// fixture pair is §6.2's own pack plus a confirmed ledger authored against
+// it (tests/fixtures/make_fixtures.py: units_pack, units_samplesheet,
+// confirm_ledger_units).
+//
+// The pack trap the phase-3 handoff names applies to every run below.
+// nf-test.config sets `profile = "test"` and conf/test.config sets
+// concept_pack to assets/packs/omop_cdm53.yaml, so concept_pack is
+// overridden EXPLICITLY on every test here; without it the ledger's
+// proposed_hash is checked against a proposal set derived from a different
+// pack and CONFIRM_LEDGER rejects the file.
+//
+// Run once before this test:
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/units.nf.test
+
+nextflow_pipeline {
+
+    name "§6.2 — convert units through UCUM, refusing ambiguity"
+    script "../main.nf"
+    tag "pipeline"
+    tag "map"
+    tag "units"
+
+    test("each analyte is converted with its OWN factor, and qc/unit_conversions.json records it (§6.2 Contract)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/units_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/units_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_units.yaml"
+                // STUDY_OUTCOME carries no rule by construction (§4.1
+                // refuses to propose an outcome-flagged column), so one of
+                // the fixture's three columns is unmapped on every run. The
+                // 0.2 default is §6.1's gate and is tested there; a firing
+                // here would say nothing about units.
+                max_unmapped_frac = 0.6
+                // --unit_conversion_table is DELIBERATELY not set: this
+                // test is the one that exercises the shipped
+                // assets/ucum_factors.yaml, so a table that shipped empty,
+                // malformed, or analyte-blind fails here rather than in
+                // whichever downstream analysis first noticed its numbers
+                // were a thousandfold out.
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def read = { path ->
+                def proc = ['python3', "${projectDir}/tests/fixtures/read_mapped.py", path].execute()
+                def out = new StringBuilder(), err = new StringBuilder()
+                proc.waitForProcessOutput(out, err)
+                assert proc.exitValue() == 0 : "could not read ${path}: ${err}"
+                new groovy.json.JsonSlurper().parseText(out.toString())
+            }
+
+            def measurement = read("${params.outdir}/mapped/measurement.parquet")
+            def conversions = new groovy.json.JsonSlurper()
+                .parse(file("${params.outdir}/qc/unit_conversions.json"))
+
+            assertAll(
+                {
+                    // The OUT slot's second artefact, with the four keys the
+                    // Contract names on every entry. Emitted per RULE, which
+                    // is what makes a conversion traceable to the decision
+                    // that licensed it rather than only to the column.
+                    assert conversions.size() == 2 :
+                        "expected one entry per converted rule, got ${conversions.size()}"
+                    conversions.each { entry ->
+                        ['rule_id', 'from', 'to', 'factor', 'n_rows'].each { key ->
+                            assert entry.containsKey(key) :
+                                "qc/unit_conversions.json entry has no ${key}; the Contract names it"
+                        }
+                    }
+                },
+                {
+                    // The Trap, as an assertion: there is NO universal
+                    // mg/dL -> SI factor, so the two entries must carry
+                    // DIFFERENT factors despite sharing a `from`. A table
+                    // keyed on the unit pair alone cannot satisfy this.
+                    def byTo = conversions.collectEntries { [(it.to): it] }
+                    assert byTo.keySet() == ['umol/L', 'mmol/L'] as Set :
+                        "converted to ${byTo.keySet()}, not the units the pack declares"
+                    assert conversions.every { it.from == 'mg/dL' }
+                    assert Math.abs(byTo['umol/L'].factor - 88.4) < 1e-9 :
+                        "creatinine's mg/dL -> umol/L factor is ${byTo['umol/L'].factor}, not 88.4"
+                    assert Math.abs(byTo['mmol/L'].factor - 0.05551) < 1e-9 :
+                        "glucose's mg/dL -> mmol/L factor is ${byTo['mmol/L'].factor}, not 0.05551"
+                    assert byTo['umol/L'].factor != byTo['mmol/L'].factor :
+                        "both analytes were converted with one factor for the unit pair -- the card's Trap, exactly"
+                },
+                {
+                    // Every measurement row is accounted for by a
+                    // conversion entry, so n_rows is a real count and not a
+                    // placeholder.
+                    assert measurement.rows.size() > 0 :
+                        "measurement.parquet is empty, so nothing below says anything"
+                    assert conversions.sum { it.n_rows } == measurement.rows.size()
+                },
+                {
+                    // The OUT slot's first clause: "same rows,
+                    // value_as_number converted". Same COUNT, and the values
+                    // are the source times the analyte's own factor.
+                    def creatinine = measurement.rows.findAll { it.measurement_concept_id == 300 }
+                    def glucose = measurement.rows.findAll { it.measurement_concept_id == 301 }
+                    assert creatinine.size() == 200 && glucose.size() == 200 :
+                        "row count changed across the conversion: ${creatinine.size()} / ${glucose.size()}"
+                    creatinine.each { row ->
+                        def expected = (row.measurement_source_value as double) * 88.4
+                        assert Math.abs((row.value_as_number as double) - expected) < 1e-6 :
+                            "creatinine ${row.measurement_source_value} mg/dL became ${row.value_as_number}, not ${expected}"
+                    }
+                    glucose.each { row ->
+                        def expected = (row.measurement_source_value as double) * 0.05551
+                        assert Math.abs((row.value_as_number as double) - expected) < 1e-6
+                    }
+                },
+                {
+                    // "unit_concept_id set" -- the OUT slot's other half.
+                    // Ruling R14 (bin/map_concepts.py) is why the id is 0
+                    // rather than a resolved concept: no vocabulary is
+                    // vendored, and 0 is OMOP's designated "no matching
+                    // concept" rather than an invented one. The unit itself
+                    // is therefore carried as a string beside it, so the
+                    // artefact still says what the number is in.
+                    assert measurement.columns.contains('unit_concept_id')
+                    assert measurement.columns.contains('unit_source_value')
+                    assert measurement.rows.every { it.unit_concept_id != null } :
+                        "a converted row carries no unit_concept_id"
+                    def units = measurement.rows*.unit_source_value.toSet()
+                    assert units == ['umol/L', 'mmol/L'] as Set :
+                        "unit_source_value is ${units}, not the units the pack declares"
+                },
+                {
+                    // The source value is UNTOUCHED by the conversion. The
+                    // card's Alternatives table rejects "store both raw and
+                    // converted" as a design, but §6.1 already keeps the
+                    // verbatim source string, and a converter that rewrote
+                    // it would delete the only record of what the cohort
+                    // actually reported.
+                    def sources = measurement.rows
+                        .findAll { it.measurement_concept_id == 301 }*.measurement_source_value
+                        .toSet()
+                    assert sources == (0..11).collect { (72 + it * 10).toString() } as Set :
+                        "measurement_source_value was rewritten by the conversion: ${sources}"
+                },
+            )
+        }
+    }
+
+    test("a creatinine column converted with the glucose factor trips implausible_after_conversion and fails the run (§6.2 done-when)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/units_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/units_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_units.yaml"
+                max_unmapped_frac = 0.6
+                // The card's Trap as a file: one factor per unit PAIR, and
+                // the pair's factor is glucose's. Creatinine is converted
+                // with it and lands ~250x below the pack's own range.
+                unit_conversion_table = "$baseDir/test_data/fixtures/units_analyte_blind_factors.yaml"
+            }
+        }
+
+        then {
+            assert workflow.failed :
+                "an analyte-blind conversion table produced a green run; the post-condition is the only thing " +
+                "standing between it and values that are plausible, wrong, and indistinguishable from biology"
+            assertAll(
+                {
+                    assert workflow.stdout.join('\n').contains('implausible_after_conversion') ||
+                           workflow.errorReport.contains('implausible_after_conversion') :
+                        "the run failed without naming the qc flag the card names"
+                },
+                {
+                    // Named specifically enough to act on: which analyte,
+                    // what it was converted with, and what the pack said.
+                    def report = workflow.errorReport ?: workflow.stdout.join('\n')
+                    assert report.contains('creatinine') :
+                        "the failure does not name the analyte, so a reader cannot tell which factor is wrong"
+                    assert report.contains('20.0') || report.contains('400.0') :
+                        "the failure does not quote the pack's plausible_range it was checked against"
+                },
+            )
+        }
+    }
+
+    test("--fail_on_implausible_range false records the flag and lets the run finish") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/units_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/units_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_units.yaml"
+                max_unmapped_frac = 0.6
+                unit_conversion_table     = "$baseDir/test_data/fixtures/units_analyte_blind_factors.yaml"
+                fail_on_implausible_range = false
+            }
+        }
+
+        then {
+            // The param's own effect column says it controls whether a
+            // converted distribution outside the pack range STOPS the run --
+            // never whether the check runs or whether its verdict is
+            // recorded. A false that also silenced the flag would turn the
+            // escape hatch into a way to make the finding disappear.
+            assert workflow.success
+            def conversions = new groovy.json.JsonSlurper()
+                .parse(file("${params.outdir}/qc/unit_conversions.json"))
+            def flagged = conversions.findAll { it.range_check?.flag == 'implausible_after_conversion' }
+            assert flagged.size() == 1 :
+                "the range check's verdict is absent from qc/unit_conversions.json, so --fail_on_implausible_range " +
+                "false hides the finding instead of demoting it"
+            assert flagged[0].to == 'umol/L'
+        }
+    }
+
+    test("--plausible_range_quantiles [0.0, 1.0] fails on the single outlier the default tolerates") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/units_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/units_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_units.yaml"
+                max_unmapped_frac = 0.6
+                // The fixture's last creatinine row is 5000 mg/dL -- 5.000
+                // with the decimal point lost. Under the default
+                // [0.01, 0.99] it sits outside the quantiles the check
+                // reads, and test 1 above is green with it in the table.
+                // Widening to the full range puts it inside, and the same
+                // data now fails.
+                plausible_range_quantiles = [0.0, 1.0]
+            }
+        }
+
+        then {
+            assert workflow.failed :
+                "--plausible_range_quantiles made no difference to the verdict, so the check is not reading it " +
+                "and 'outliers alone cannot fail it' is a claim nothing enforces"
+            assert (workflow.errorReport ?: workflow.stdout.join('\n')).contains('implausible_after_conversion')
+        }
+    }
+
+    test("a missing factor is refused, never defaulted to 1.0 (§6.2 SIDE)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/units_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/units_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_units.yaml"
+                max_unmapped_frac = 0.6
+                // Glucose only. Creatinine's mg/dL -> umol/L conversion has
+                // no entry at all.
+                unit_conversion_table = "$baseDir/test_data/fixtures/units_missing_factor_factors.yaml"
+            }
+        }
+
+        then {
+            // A converter that treated a missing factor as 1.0 would emit
+            // creatinine in mg/dL under a column the pack says is umol/L,
+            // and every downstream check would agree with it: the type is
+            // right, the values are numbers, and only a comparison against
+            // another cohort would ever expose it. That is the card's Why in
+            // one sentence, and it is why this is an exit code.
+            assert workflow.failed :
+                "a conversion with no factor produced a green run"
+            def report = workflow.errorReport ?: workflow.stdout.join('\n')
+            assertAll(
+                {
+                    assert report.contains('creatinine') :
+                        "the refusal does not name the analyte whose factor is missing"
+                },
+                {
+                    assert report.contains('mg/dL') && report.contains('umol/L') :
+                        "the refusal does not name the conversion it could not perform"
+                },
+            )
+        }
+    }
+}

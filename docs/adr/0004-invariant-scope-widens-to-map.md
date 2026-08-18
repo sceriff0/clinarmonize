@@ -155,3 +155,38 @@ hundred: `bin/invariant_report.py` names `insufficient-permutations` as its
 own verdict because shortening the range is the cheapest way to weaken this
 test, and a map scope certified on ten seeds beside a propose scope certified
 on a hundred would be a weaker claim wearing the same word.
+
+## Amendment (§6.2): `mapped/` grew a stage, and the digest followed it
+
+`map` still names the artefact list `[ledger.proposed.yaml, mapped/]`, and
+`SCOPE_ARTEFACTS` in `bin/invariant_report.py` is untouched. What changed is
+what `mapped/` IS. §6.2 converts units into the pack's declared unit and
+rewrites the same five tables plus `_unmapped.parquet` under the same names,
+so `results/mapped/` is now `CONVERT_UNITS`' output and `MAP_CONCEPTS`'
+output is an intermediate that is no longer published.
+
+The replicate therefore runs one more step, and the block above should be
+read with it:
+
+```
+    map, using the BASELINE rules/ruleset.json       # MAP_CONCEPTS_PERMUTED
+    convert units, BASELINE factor table and params  # CONVERT_UNITS_PERMUTED — NEW
+    collect a canonical content digest of mapped/    # over the CONVERTED tables
+```
+
+There is an argument that this was unnecessary, and it is worth writing down
+because it is the argument this ADR exists to distrust. A unit conversion is
+a fixed function of the mapped rows — the factor table, the ruleset and the
+pack are all held at the baseline — so `n_distinct(converted)` can never
+exceed `n_distinct(mapped)`, and digesting §6.1's output would be no less
+sensitive to a leak. True, and the same shape as ADR-003's own soundness
+argument for scoping the harness at the proposer: correct at the time, and
+false the moment the stage after it started reading something new. Measuring
+the bytes the run actually publishes needs no such argument and cannot go
+stale when §6.3 lands. The cost is ~100 additional tasks on a full map-scoped
+run.
+
+The factor table and `--plausible_range_quantiles` are the BASELINE's on
+every replicate, exactly as the ruleset is. A per-replicate conversion table
+would introduce a second moving part, and a red verdict would no longer say
+which one moved.

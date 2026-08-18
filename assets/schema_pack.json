@@ -72,7 +72,16 @@
                     },
                     "unit": {
                         "type": "string",
-                        "description": "Unit the derived/continuous variable is expressed in."
+                        "description": "Unit the derived/continuous variable is expressed in. For a non-derived continuous variable this is §6.2's unit_out: the ONE unit the pipeline will convert a source column into, and the only unit it is ever allowed to convert to (§6.2 nogo). A variable that declares none is passed through unconverted."
+                    },
+                    "plausible_range": {
+                        "type": "array",
+                        "minItems": 2,
+                        "maxItems": 2,
+                        "items": {
+                            "type": "number"
+                        },
+                        "description": "[low, high] bound, expressed in `unit`, that §6.2's post-condition checks a CONVERTED distribution against: the requested quantiles of the result must fall inside it, or the conversion is flagged implausible_after_conversion and (by default) the run fails. Population bounds for the measurement, never a study-specific range (§10.3) and never widened to silence the check (§6.2 nogo). Optional: a variable that declares none has no post-condition to evaluate, which §6.2 records rather than passes over in silence."
                     },
                     "outcome": {
                         "type": "boolean",

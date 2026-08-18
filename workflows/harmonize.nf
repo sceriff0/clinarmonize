@@ -27,6 +27,7 @@ include { LINK_RESOLVE } from '../modules/local/link_resolve/main'
 include { CONFIRM_LEDGER } from '../modules/local/confirm_ledger/main'
 include { COMPILE_RULES } from '../modules/local/compile_rules/main'
 include { MAP_CONCEPTS } from '../modules/local/map_concepts/main'
+include { CONVERT_UNITS } from '../modules/local/convert_units/main'
 //
 // ADR-004 -- `--invariant_scope map` re-runs LINK and MAP on every permuted
 // replicate, through the SAME processes the baseline uses, under aliases.
@@ -41,6 +42,18 @@ include { LINK_BLOCKING as LINK_BLOCKING_PERMUTED } from '../modules/local/link_
 include { LINK_SCORE    as LINK_SCORE_PERMUTED    } from '../modules/local/link_score/main'
 include { LINK_RESOLVE  as LINK_RESOLVE_PERMUTED  } from '../modules/local/link_resolve/main'
 include { MAP_CONCEPTS  as MAP_CONCEPTS_PERMUTED  } from '../modules/local/map_concepts/main'
+//
+// §6.2 is INSIDE the 'map' stage, so ADR-004's `mapped/` artefact is this
+// process's output and not MAP_CONCEPTS'. Digesting §6.1's output instead
+// would leave the harness measuring an artefact the run does not publish --
+// and the argument that it makes no difference (a unit conversion is a fixed
+// function of the mapped rows, so it cannot introduce a dependence on the
+// outcome that was not already there) is exactly the shape of soundness
+// argument ADR-003 made for the propose scope and ADR-004 had to widen when
+// it stopped holding. Cheaper to measure the published bytes than to keep
+// re-deriving why measuring something else is equivalent.
+//
+include { CONVERT_UNITS as CONVERT_UNITS_PERMUTED } from '../modules/local/convert_units/main'
 include { ARTEFACT_DIGEST } from '../modules/local/artefact_digest/main'
 
 /*
@@ -423,6 +436,19 @@ def buildMapParamsJson(String cdmVersion, List cdmDomains, Number maxUnmappedFra
     ])
 }
 
+//
+// §6.2's own params, as their own document rather than more keys on
+// buildMapParamsJson's: bin/convert_units.py never reads a §6.1 param and
+// bin/map_concepts.py never reads a §6.2 one, and a shared blob would let
+// either start doing so without the wiring saying it had.
+//
+def buildConvertParamsJson(Boolean failOnImplausibleRange, List plausibleRangeQuantiles) {
+    return groovy.json.JsonOutput.toJson([
+        fail_on_implausible_range: failOnImplausibleRange,
+        plausible_range_quantiles: plausibleRangeQuantiles,
+    ])
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     §10.1 — the outcome-permutation harness
@@ -562,6 +588,9 @@ workflow CLINICALHARMONIZE {
     cdm_domains             // list:    the five-table subset emitted; never a claim of full conformance (§6.1)
     max_unmapped_frac       // number:  above this fraction of source values unmapped, the run fails (§6.1)
     keep_source_concept     // boolean: retains the pre-translation concept; off breaks --audit (§6.1)
+    unit_conversion_table   // string:  analyte-aware factors; the ONLY source of conversions (§6.2)
+    fail_on_implausible_range // boolean: a converted distribution outside the pack range stops the run (§6.2)
+    plausible_range_quantiles // list:   which quantiles the range check reads, so outliers alone cannot fail it (§6.2)
     outdir                 // string:  output directory
 
     main:
@@ -1132,6 +1161,7 @@ workflow CLINICALHARMONIZE {
     */
     def ch_mapped = channel.empty()
     def ch_unmapped = channel.empty()
+    def ch_unit_conversions = channel.empty()
 
     // Hoisted out of the map block for the same reason outcomeVariablesJson
     // was hoisted out of the link block: the map-scoped harness below feeds
@@ -1139,6 +1169,12 @@ workflow CLINICALHARMONIZE {
     def (packVariablesForMap, vocabularyReleaseForMap) = loadPackForPropose(concept_pack)
     def packVariablesForMapJson = groovy.json.JsonOutput.toJson(packVariablesForMap)
     def mapParamsJson = buildMapParamsJson(cdm_version, cdm_domains, max_unmapped_frac, keep_source_concept)
+    def convertParamsJson = buildConvertParamsJson(fail_on_implausible_range, plausible_range_quantiles)
+    // Resolved once, outside the block, for the same reason: the permuted
+    // replicates below convert against the IDENTICAL factor table. A second
+    // file() call is a second chance for the two halves of the harness to be
+    // reading different conversions.
+    def unitConversionTableFile = file(resolvePackPath(unit_conversion_table), checkIfExists: true)
 
     if (graph.indexOf(graphStage) >= graph.indexOf('map')) {
         // The tables document and the links arrive as ONE tuple keyed by
@@ -1153,8 +1189,33 @@ workflow CLINICALHARMONIZE {
             mapParamsJson,
         )
         ch_versions = ch_versions.mix(MAP_CONCEPTS.out.versions)
-        ch_mapped = MAP_CONCEPTS.out.mapped
         ch_unmapped = MAP_CONCEPTS.out.unmapped
+
+        //
+        // §6.2 — convert units through UCUM, refusing ambiguity.
+        //
+        // Not a separate stage. §0.9's graph has nine entries and 'map' is
+        // one of them; §6.1, §6.2 and §6.3 are its parts, exactly as §3.1 to
+        // §3.3 are 'link'. `--stop_after map` therefore reaches through this
+        // process, and there is no `--stop_after` value that stops between
+        // §6.1 and §6.2 -- a mapped table whose units were never converted is
+        // not a smaller result, it is a result in unknown units.
+        //
+        // ch_mapped is REBOUND to this process's output, so every consumer of
+        // mapped/ -- conf/modules.config's publishDir, ARTEFACT_DIGEST under
+        // ADR-004, and §6.3 when it is built -- sees the converted artefact
+        // and there is only ever one mapped/ in the repo's vocabulary.
+        //
+        CONVERT_UNITS(
+            MAP_CONCEPTS.out.mapped,
+            ch_ruleset,
+            packVariablesForMapJson,
+            unitConversionTableFile,
+            convertParamsJson,
+        )
+        ch_versions = ch_versions.mix(CONVERT_UNITS.out.versions)
+        ch_mapped = CONVERT_UNITS.out.mapped
+        ch_unit_conversions = CONVERT_UNITS.out.conversions
     }
 
     /*
@@ -1242,6 +1303,26 @@ workflow CLINICALHARMONIZE {
         )
         ch_versions = ch_versions.mix(MAP_CONCEPTS_PERMUTED.out.versions.first())
 
+        // §6.2 on every replicate, for the reason the import comment gives:
+        // the artefact ADR-004 names is `mapped/`, and after §6.2 that is
+        // this process's output. The baseline's digest below comes from
+        // ch_mapped, which is already CONVERT_UNITS'; digesting the
+        // replicates before conversion would compare two different artefacts
+        // and call the result one hash set.
+        //
+        // The factor table and the params are the BASELINE's, exactly as the
+        // ruleset is (ADR-004: what varies across replicates is the permuted
+        // outcome and nothing else -- a per-replicate conversion table would
+        // introduce a second moving part and make a red verdict unattributable).
+        CONVERT_UNITS_PERMUTED(
+            MAP_CONCEPTS_PERMUTED.out.mapped,
+            ch_baseline_ruleset,
+            packVariablesForMapJson,
+            unitConversionTableFile,
+            convertParamsJson,
+        )
+        ch_versions = ch_versions.mix(CONVERT_UNITS_PERMUTED.out.versions.first())
+
         // ONE invocation over the baseline AND every replicate, mixed into a
         // single channel -- so there is no second call site whose code could
         // differ from the one that digested the run the replicates are
@@ -1249,7 +1330,7 @@ workflow CLINICALHARMONIZE {
         // their baseline invocation is a real pipeline stage that publishes
         // results; this process exists only for the harness, so it does not.)
         ARTEFACT_DIGEST(
-            ch_mapped.mix(MAP_CONCEPTS_PERMUTED.out.mapped),
+            ch_mapped.mix(CONVERT_UNITS_PERMUTED.out.mapped),
             'mapped/',
             ledger_float_precision,
         )
@@ -1310,6 +1391,8 @@ workflow CLINICALHARMONIZE {
     links      = ch_links          // channel: [ val(replicate), path(links.parquet) ] (§3.3; replicate is null for the baseline)
     link_report = ch_link_report   // channel: [ val(replicate), path(link_report.json) ] (§3.3; replicate is null for the baseline)
     confirmed  = ch_confirmed      // channel: [ cohort_id, dataset_id, column, variable, concept_id, rule_id ] (§5.1/§5.2)
+    mapped     = ch_mapped         // channel: [ val(replicate), [path(mapped/*.parquet)] ] (§6.1 mapped, §6.2 converted)
+    unit_conversions = ch_unit_conversions // channel: [ val(replicate), path(qc/unit_conversions.json) ] (§6.2)
     versions   = ch_versions       // channel: [ path(versions.yml) ]
 }
 

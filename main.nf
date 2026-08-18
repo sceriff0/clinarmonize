@@ -96,6 +96,9 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
         params.cdm_domains,
         params.max_unmapped_frac,
         params.keep_source_concept,
+        params.unit_conversion_table,
+        params.fail_on_implausible_range,
+        params.plausible_range_quantiles,
         params.outdir,
     )
     emit:

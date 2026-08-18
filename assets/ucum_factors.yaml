@@ -1,0 +1,112 @@
+# assets/ucum_factors.yaml — §6.2's UnitConverter alts seam, the "analyte-aware
+# factor table" implementation. What --unit_conversion_table points at by
+# default, and per that param's own effect column, the ONLY source of
+# conversions the pipeline has.
+#
+# The one rule this file exists to enforce
+# ----------------------------------------
+# Every row names an ANALYTE. There is no wildcard, no "any analyte" entry,
+# and no row keyed on the unit pair alone — because there is no universal
+# mg/dL -> mmol/L factor to key one on. The factor is molar-mass specific, so
+# a table organised by unit pair answers every question confidently and is
+# wrong for every analyte but the one whose molar mass it happens to encode.
+# That is §6.2's Trap in full: the resulting values are plausible, wrong, and
+# indistinguishable from real biological variation.
+#
+# `analyte` is the PACK VARIABLE's name (the `to.variable` of the confirmed
+# rule), not the source column's header. The pack is where a variable's
+# identity and its canonical unit are both declared, so keying on it means
+# the conversion and the unit it converts INTO are read from the same
+# declaration and cannot drift apart.
+#
+# What is deliberately NOT here
+# -----------------------------
+# 1. Inverse rows are not generated. `mg/dL -> umol/L` does not imply
+#    `umol/L -> mg/dL`; if a pack needs the reverse direction, the reverse
+#    row is written below, reviewed like any other. Manufacturing a factor by
+#    arithmetic is one short step from manufacturing one by assumption, and
+#    §6.2's SIDE clause wants a MISSING factor to be loud.
+# 2. Identity is not listed. from == to needs no factor and gets none: §6.2
+#    short-circuits it at 1.0 without consulting this file, because there is
+#    no molar ambiguity in converting a unit to itself.
+# 3. Compound-unit grammar is not parsed. The `to` and `from` strings are
+#    matched literally against the pack's `unit` and the rule's `unit_in`. A
+#    real UCUM library would parse arbitrary compound units — the card's own
+#    Alternatives table names it, and names its limit too: it still cannot
+#    supply the analyte-specific molar factors, which is the hard half.
+#
+# Every mass-to-molar factor below is 10 / M (M = molar mass in g/mol), which
+# is what converts mg/dL to mmol/L; the umol/L rows carry that times 1000.
+# The molar mass is quoted on every row so the arithmetic is checkable
+# without leaving the file.
+#
+# §10.3 generality: an analyte is a measurable substance, not a disease term,
+# a gene symbol or a cohort name, and no value below is specific to any one
+# study — a molar mass is a property of the molecule. None of this appears in
+# modules/, workflows/, subworkflows/ or bin/, which is what
+# --generality_paths covers.
+factors:
+  - analyte: creatinine
+    from: mg/dL
+    to: umol/L
+    factor: 88.4
+    source: "10 / 113.12 g/mol x 1000 = 88.402"
+
+  - analyte: glucose
+    from: mg/dL
+    to: mmol/L
+    factor: 0.05551
+    source: "10 / 180.156 g/mol = 0.055508"
+
+  - analyte: urea
+    from: mg/dL
+    to: mmol/L
+    factor: 0.1665
+    source: "10 / 60.06 g/mol = 0.16650. NOT interchangeable with blood urea nitrogen, which measures the nitrogen only and is a different analyte with a different factor (0.357); if a pack declares one, it must not be converted with the other's row."
+
+  - analyte: uric_acid
+    from: mg/dL
+    to: umol/L
+    factor: 59.48
+    source: "10 / 168.11 g/mol x 1000 = 59.485"
+
+  - analyte: bilirubin_total
+    from: mg/dL
+    to: umol/L
+    factor: 17.1
+    source: "10 / 584.66 g/mol x 1000 = 17.104"
+
+  - analyte: calcium
+    from: mg/dL
+    to: mmol/L
+    factor: 0.2495
+    source: "10 / 40.078 g/mol = 0.24951"
+
+  - analyte: cholesterol_total
+    from: mg/dL
+    to: mmol/L
+    factor: 0.02586
+    source: "10 / 386.65 g/mol = 0.025863"
+
+  - analyte: triglycerides
+    from: mg/dL
+    to: mmol/L
+    factor: 0.01129
+    source: "10 / 885.4 g/mol = 0.011294 (triolein, the conventional reference triglyceride)"
+
+  # Two mass-concentration rows. The factor happens not to depend on the
+  # molecule here — g/dL to g/L is 10 whatever is dissolved — and they are
+  # STILL written per analyte, one row each. A single wildcard row would be
+  # correct for exactly these two conversions and would establish the shape
+  # the mass-to-molar rows above must never take.
+  - analyte: albumin
+    from: g/dL
+    to: g/L
+    factor: 10.0
+    source: "metric prefix only; no molar mass involved"
+
+  - analyte: hemoglobin
+    from: g/dL
+    to: g/L
+    factor: 10.0
+    source: "metric prefix only; no molar mass involved"

@@ -1,0 +1,21 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/environment-schema.json
+#
+# Canonical spec for the profiling/ledger container. This is the ONE source of
+# truth: containers/duckdb-pyyaml/Dockerfile builds the image from this file,
+# and every modules/local/*/environment.yml is a verbatim copy of it, so the
+# conda path and the container path cannot drift apart.
+#
+# procps-ng is not optional. Nextflow's task wrapper shells out to `ps` to
+# collect resource metrics whenever trace.enabled is set (nextflow.config), and
+# it does so BEFORE the process script runs -- an image without it fails every
+# task with a bare non-zero exit and no useful message. The original Wave image
+# happened to ship it as a transitive dependency; pinning it explicitly means
+# that stays true by intent rather than by luck.
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - conda-forge::duckdb=1.5.5
+  - conda-forge::pyyaml=6.0.2
+  - conda-forge::procps-ng=4.0.6

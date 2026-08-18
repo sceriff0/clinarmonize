@@ -1134,6 +1134,272 @@ def link_outcome_blocking_rules(target_dir: Path) -> Path:
     return path
 
 
+# ---------------------------------------------------------------------------
+# §6.2 unit conversion (docs/steps/s6-2.md)
+# ---------------------------------------------------------------------------
+
+# The §6.2 fixture pair's own ledger.proposed.yaml hash, under
+# `--stop_after propose` with default §4 params against units_samplesheet()
+# + units_pack(). Derived empirically by running the pipeline once and
+# hashing the published file -- the same method confirm_ledger_valid() and
+# confirm_ledger_invariant() describe, and for the same reason: §5.1's
+# staleness guard is what stops a ruleset confirmed for other data being
+# applied to this one, so the hash is EVIDENCE, never a value typed to make
+# a gate pass.
+#
+# The phase-3 handoff's pack trap applies here in reverse and is worth
+# restating: nf-test.config sets `profile = "test"` and conf/test.config
+# sets concept_pack to assets/packs/omop_cdm53.yaml, so this hash is only
+# correct for a run that OVERRIDES concept_pack to units_pack(), which
+# tests/units.nf.test does on every one of its runs.
+_UNITS_FIXTURE_HASH = "sha256:e608bfbdde3a7a3532c04e984406a8079f3445a71911050b705d7b73e7371444"
+
+
+def units_pack(target_dir: Path) -> Path:
+    """§6.2's own concept pack: two continuous analytes whose canonical
+    units differ from the source's, plus the mandatory outcome flag.
+
+    The pack is where `unit` (§6.2's unit_out) and `plausible_range` (the
+    post-condition's own bound) live -- the card's nogo is "Never convert to
+    a unit the pack does not declare", so a fixture that declared neither
+    could not exercise the card at all.
+
+    The two analytes are the card's own worked example, and they are here
+    for the reason the Trap gives rather than for clinical realism: there is
+    NO universal mg/dL -> SI factor, and these two are the pair whose
+    factors differ by three orders of magnitude once each is expressed in
+    its own canonical unit (88.4 umol/L per mg/dL for creatinine, 0.05551
+    mmol/L per mg/dL for glucose). An analyte-blind table is therefore
+    detectable on this fixture -- which is precisely what
+    units_analyte_blind_factors() below is built to prove.
+
+    §10.3 generality: an analyte name is not a disease term, a gene symbol
+    or a cohort name, and neither range below is specific to any one study
+    -- they are the population bounds a laboratory assay is reportable
+    over. They also live in a TEST fixture and in assets/ucum_factors.yaml,
+    never in modules/ or workflows/ (Global Constraint 4, whose scope is
+    those directories and bin/).
+    """
+    pack = {
+        "pack": "units-fixture-generic",
+        "version": "0.1.0",
+        "vocabulary": "test-vocab-2026",
+        "variables": [
+            {
+                "name": "creatinine",
+                "domain": "measurement",
+                "concept_id": 300,
+                "type": "continuous",
+                "unit": "umol/L",
+                "plausible_range": [20.0, 400.0],
+            },
+            {
+                "name": "glucose",
+                "domain": "measurement",
+                "concept_id": 301,
+                "type": "continuous",
+                "unit": "mmol/L",
+                "plausible_range": [1.0, 40.0],
+            },
+            {
+                "name": "study_outcome",
+                "domain": "derived",
+                "derivation": "survival_time",
+                "unit": "day",
+                "outcome": True,
+            },
+        ],
+    }
+    path = target_dir / "units_pack.yaml"
+    path.write_text(yaml.safe_dump(pack, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def units_fixture_table(target_dir: Path) -> Path:
+    """Two hundred rows of two mg/dL analytes plus the outcome column, with
+    one deliberate data-entry outlier.
+
+    Both headers carry the `mg/dL` token assets/unit_patterns.yaml already
+    matches, so §2.2 ranks mg/dL as the source unit and the confirmed
+    ledger's `unit_in` is the human AGREEING with evidence the run produced
+    -- not a value invented at the gate.
+
+    The values are chosen so that BOTH analytes land inside their pack
+    plausible_range under their OWN factor, and creatinine lands two orders
+    of magnitude below its range under glucose's. If the two ranges
+    overlapped after a wrong conversion the fixture would prove nothing:
+    that is the card's Trap ("plausible, wrong, and indistinguishable from
+    real biological variation") and it is the reason the canonical units
+    here are umol/L and mmol/L rather than mmol/L for both.
+
+    Why 200 rows and not 12. --plausible_range_quantiles exists so that
+    "outliers alone cannot fail it" (the card's own effect column), and that
+    claim is untestable on a short table: p1 and p99 of twelve values are
+    the min and the max, so every quantile setting behaves identically and a
+    test could not tell a live param from a decorative one. At 200 rows the
+    0.99 quantile genuinely excludes the top row, so the LAST record --
+    creatinine 5000 mg/dL, a transcription of 5.000 with the point lost --
+    passes under the default and fails under `[0.0, 1.0]`. One fixture,
+    both behaviours, and the param is demonstrated rather than asserted.
+
+    STUDY_OUTCOME carries no rule on purpose -- it is the outcome-flagged
+    variable's own name, §4.1 refuses to propose it, and its values reach
+    mapped/_unmapped.parquet, so this fixture also holds --max_unmapped_frac
+    above the default on every run that uses it.
+    """
+    n = 200
+    header = ["CREATININE_MGDL", "GLUCOSE_MGDL", "STUDY_OUTCOME"]
+    rows = [header]
+    for i in range(n):
+        rows.append(
+            [
+                # 0.6 .. 1.7 mg/dL -> 53 .. 150 umol/L at 88.4, inside the
+                # pack's [20, 400]; 0.033 .. 0.094 at glucose's 0.05551,
+                # which is below 20 by a factor of ~250.
+                f"{0.6 + (i % 12) * 0.1:.1f}",
+                # 72 .. 182 mg/dL -> 4.0 .. 10.1 mmol/L at 0.05551, inside
+                # the pack's [1, 40].
+                str(72 + (i % 12) * 10),
+                str(round(5.0 + (i % 12) * 2.5, 1)),
+            ]
+        )
+    # The outlier, and only one of them: at 200 rows the 0.99 quantile
+    # excludes exactly the top ~2, so a second would defeat the default and
+    # make this fixture test the opposite of what it is for.
+    rows[-1][0] = "5000"
+    path = target_dir / "tables" / "units_fixture.csv"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(",".join(r) for r in rows) + "\n")
+    return path
+
+
+def units_samplesheet(target_dir: Path) -> Path:
+    """Points --input at units_fixture_table(); pair with --concept_pack
+    units_pack()."""
+    table = units_fixture_table(target_dir)
+    rows = [
+        "cohort_id,dataset_id,role,path,holdout",
+        f"COHORT_UNITS,units_test,clinical,{table},false",
+    ]
+    path = target_dir / "units_samplesheet.csv"
+    path.write_text("\n".join(rows) + "\n")
+    return path
+
+
+def confirm_ledger_units(target_dir: Path) -> Path:
+    """The human gate for the §6.2 fixture: both analytes accepted, each
+    with the mg/dL source unit §2.2 ranked for its header.
+
+    `unit_in` is the only place a source unit is ever resolved (§5.1's own
+    Contract comment: "the resolved unit; §2.2 only ranked them"), and
+    §5.2 records it verbatim into every rule's `params`. §6.2 reads it from
+    there and pairs it with the pack's `unit` -- it never re-reads §2.2's
+    ranking, because a ranking is candidates and a conversion needs a
+    decision.
+    """
+    rows = [
+        {
+            "cohort_id": "COHORT_UNITS",
+            "dataset_id": "units_test",
+            "column": "CREATININE_MGDL",
+            "decision": "accept",
+            "variable": "creatinine",
+            "concept_id": 300,
+            "unit_in": "mg/dL",
+            "confirmed_by": "a.reviewer",
+            "rationale": "header carries the mg/dL token and the value range is a serum creatinine assay's",
+            "proposed_hash": _UNITS_FIXTURE_HASH,
+        },
+        {
+            "cohort_id": "COHORT_UNITS",
+            "dataset_id": "units_test",
+            "column": "GLUCOSE_MGDL",
+            "decision": "accept",
+            "variable": "glucose",
+            "concept_id": 301,
+            "unit_in": "mg/dL",
+            "confirmed_by": "a.reviewer",
+            "rationale": "header carries the mg/dL token and the value range is a plasma glucose assay's",
+            "proposed_hash": _UNITS_FIXTURE_HASH,
+        },
+    ]
+    path = target_dir / "confirm_ledger_units.yaml"
+    path.write_text(yaml.safe_dump(rows, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def units_analyte_blind_factors(target_dir: Path) -> Path:
+    """The card's Trap, as a file: one factor per unit PAIR, applied to
+    every analyte that asks for it.
+
+    This is what a conversion table looks like when whoever wrote it
+    believed mg/dL -> SI is a property of the units alone. Glucose's factor
+    is the one that won -- it is the commoner assay -- so creatinine is
+    converted with it and lands ~250x below its own pack plausible_range.
+
+    The done-when this fixture serves is the card's own last line: "A
+    creatinine column converted with the glucose factor trips
+    implausible_after_conversion and fails the run." Note what is NOT being
+    tested by it: nothing here is a missing-factor case, because a table
+    with a hole fails loudly for a reason nobody could mistake. The
+    dangerous table is the one that answers every question confidently and
+    is wrong for all but one analyte, and that is this file.
+    """
+    factors = {
+        "factors": [
+            {
+                "analyte": "creatinine",
+                "from": "mg/dL",
+                "to": "umol/L",
+                # 0.05551 is GLUCOSE's mg/dL -> mmol/L factor. Creatinine's
+                # own mg/dL -> umol/L factor is 88.4. This single digit is
+                # the entire sabotage.
+                "factor": 0.05551,
+                "source": "DELIBERATELY WRONG -- glucose's factor on creatinine's row (test fixture)",
+            },
+            {
+                "analyte": "glucose",
+                "from": "mg/dL",
+                "to": "mmol/L",
+                "factor": 0.05551,
+                "source": "1 / 18.016 (molar mass of glucose, g/mol)",
+            },
+        ]
+    }
+    path = target_dir / "units_analyte_blind_factors.yaml"
+    path.write_text(yaml.safe_dump(factors, sort_keys=False, default_flow_style=False))
+    return path
+
+
+def units_missing_factor_factors(target_dir: Path) -> Path:
+    """A conversion table with a HOLE: glucose only, creatinine absent.
+
+    The other half of the card's SIDE clause ("fails the run on an ambiguous
+    or MISSING conversion factor"), and the reason it is a separate fixture
+    from units_analyte_blind_factors(): the two failures look identical from
+    outside (a red run) and are opposite inside. An analyte-blind table
+    answers confidently and wrongly, and only the pack's plausible_range
+    catches it; a table with a hole cannot answer at all, and must be caught
+    BEFORE any number is written, because a converter that fell back to 1.0
+    would emit mg/dL under a column the pack says is umol/L and nothing
+    downstream could tell.
+    """
+    factors = {
+        "factors": [
+            {
+                "analyte": "glucose",
+                "from": "mg/dL",
+                "to": "mmol/L",
+                "factor": 0.05551,
+                "source": "1 / 18.016 (molar mass of glucose, g/mol)",
+            }
+        ]
+    }
+    path = target_dir / "units_missing_factor_factors.yaml"
+    path.write_text(yaml.safe_dump(factors, sort_keys=False, default_flow_style=False))
+    return path
+
+
 FIXTURES = [
     valid_samplesheet,
     duplicate_samplesheet,
@@ -1163,6 +1429,11 @@ FIXTURES = [
     link_comparisons,
     confirm_ledger_invariant,
     link_outcome_blocking_rules,
+    units_pack,
+    units_samplesheet,
+    confirm_ledger_units,
+    units_analyte_blind_factors,
+    units_missing_factor_factors,
 ]
 
 
