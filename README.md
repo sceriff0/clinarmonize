@@ -88,9 +88,15 @@ Or, as a batch job, which does all of the above for you:
 
 ```bash
 cd ~/pipelines/clinarmonize && mkdir -p logs
-RUN_DIR=/path/to/scratch/clinarmonize_run \
-    sbatch --partition=<your-partition> tools/sbatch_run_pipeline.sh
+sbatch --partition=<your-partition> tools/sbatch_run_pipeline.sh \
+    --run-dir=/path/to/scratch/clinarmonize_run
 ```
+
+Pass `--run-dir` as an **argument**, not as `RUN_DIR=... sbatch ...`. The
+environment form sets the variable for `sbatch` itself, and SLURM forwards it
+to the job only under `--export=ALL`; where a site defaults to `NONE` the job
+starts with `RUN_DIR` unset and nothing in the submitting shell indicates why.
+The argument form travels in the command line, which SLURM always preserves.
 
 `work/`, `results/`, `nextflow.log`, `params_hash.txt` and the generated
 fixtures all land under `$RUN_DIR`; the checkout is left untouched. Everything

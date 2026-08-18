@@ -19,19 +19,25 @@
 # Submit from the repo root, with RUN_DIR pointing at scratch:
 #
 #   mkdir -p logs
-#   RUN_DIR=/path/to/scratch/run sbatch --partition=<yours> \
-#       tools/sbatch_run_pipeline.sh
+#   sbatch --partition=<yours> tools/sbatch_run_pipeline.sh \
+#       --run-dir=/path/to/scratch/run
+#
+# Pass --run-dir as an ARGUMENT rather than as `RUN_DIR=... sbatch ...`. The
+# environment form works only where SLURM is configured to forward the
+# submitting environment (--export=ALL); where it is not, the job starts with
+# RUN_DIR unset and nothing in the submitting shell says so.
 #
 # With no trailing arguments it runs the §6.3 fixture demo end to end
 # (generates fixtures, runs through `map`, writes the alluvial plots). With
 # trailing arguments it passes them straight to `nextflow run` instead:
 #
-#   RUN_DIR=/path/to/scratch/run sbatch --partition=<yours> \
-#       tools/sbatch_run_pipeline.sh \
+#   sbatch --partition=<yours> tools/sbatch_run_pipeline.sh \
+#       --run-dir=/path/to/scratch/run \
 #       --stop_after propose --input /path/to/your/samplesheet.csv
 #
 # Knobs (env vars, all optional except RUN_DIR):
-#   RUN_DIR     where work/, results/ and fixtures/ go   (REQUIRED)
+#   RUN_DIR     where work/, results/ and fixtures/ go   (REQUIRED -- prefer
+#               the --run-dir=PATH argument, see above)
 #   SRC_DIR     the pipeline checkout                    (default: submit dir)
 #   CONDA_ENV   conda env providing nextflow/java/python (default: nf-env;
 #               set CONDA_ENV= empty to skip activation entirely)
@@ -62,8 +68,28 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 SRC_DIR="${SRC_DIR:-${SLURM_SUBMIT_DIR:-$PWD}}"
 [[ -f "$SRC_DIR/main.nf" ]] || \
   die "no main.nf under SRC_DIR='$SRC_DIR'. Submit from the repo root, or set SRC_DIR."
-[[ -n "${RUN_DIR:-}" ]] || \
-  die "RUN_DIR is not set. Point it at scratch: RUN_DIR=/path/to/scratch/run sbatch ..."
+
+# --run-dir=PATH, consumed here and never passed on to nextflow.
+#
+# This exists because `RUN_DIR=... sbatch script.sh` is NOT reliable: it sets
+# the variable for sbatch's own process, and SLURM forwards it to the job only
+# under --export=ALL. Plenty of sites default to NONE or set SBATCH_EXPORT in
+# /etc/profile, and the job then starts with RUN_DIR unset for a reason that
+# is invisible from the submitting shell. An argument travels in the command
+# line, which SLURM always preserves.
+case "${1:-}" in
+  --run-dir=*) RUN_DIR="${1#--run-dir=}"; shift ;;
+  --run-dir)   RUN_DIR="${2:-}"; shift 2 ;;
+esac
+
+[[ -n "${RUN_DIR:-}" ]] || die "RUN_DIR is not set. Either pass it as an argument (always works):
+
+    sbatch tools/sbatch_run_pipeline.sh --run-dir=/path/to/scratch/run
+
+or export it through SLURM explicitly (needed because this site does not
+forward the submitting environment by default):
+
+    sbatch --export=ALL,RUN_DIR=/path/to/scratch/run tools/sbatch_run_pipeline.sh"
 
 echo "=== clinarmonize batch run ==="
 echo "job         : ${SLURM_JOB_ID:-<interactive>} on $(hostname)"

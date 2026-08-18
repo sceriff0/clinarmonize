@@ -73,6 +73,12 @@ fi
 
 command -v nextflow >/dev/null 2>&1 || die "nextflow is not on PATH (set CONDA_ENV, or module load it)."
 
+# Java, checked here rather than met as a JVM stack trace three screens into a
+# batch log. tools/verify_clinarmonize.sh already does this; the omission here
+# was a gap, not a decision.
+command -v java >/dev/null 2>&1 || \
+  die "java is not on PATH (Nextflow needs >= 17). Add it to your conda env or 'module load java'."
+
 # ---------------------------------------------------------------------------
 # The version pin, checked here rather than discovered as a stack trace.
 # nextflow.config declares `nextflowVersion = '!>=26.04.6'`; the leading '!'
