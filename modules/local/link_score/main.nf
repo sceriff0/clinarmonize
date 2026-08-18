@@ -24,15 +24,17 @@
 // ratio is for.
 //
 process LINK_SCORE {
-    tag "link:score"
+    tag "link:score:${replicate == null ? 'baseline' : 'p' + replicate}"
     label 'process_single'
 
     conda "${moduleDir}/environment.yml"
     container "docker.io/bolt3x/clinarmonize-duckdb@sha256:056f3260afbddaf99bfbd881b25f318b24ead3103bc626e4401e4f5afa03a7e0"
 
     input:
-    val   tables_json
-    path  candidate_pairs
+    // [replicate, tables_json, candidate_pairs] as ONE tuple, so the pairs
+    // scored here provably came from the same replicate's blocking run --
+    // see LINK_BLOCKING's own note on why position is not enough.
+    tuple val(replicate), val(tables_json), path(candidate_pairs)
     path  comparison_spec
     val   outcome_variables_json
     val   em_iterations
@@ -40,9 +42,9 @@ process LINK_SCORE {
     val   random_pair_n
 
     output:
-    path "link/scores.parquet", emit: scores
-    path "link/model.json",     emit: model
-    path "versions.yml",        emit: versions
+    tuple val(replicate), path("link/scores.parquet"), emit: scores
+    tuple val(replicate), path("link/model.json"),     emit: model
+    path "versions.yml",                               emit: versions
 
     script:
     """

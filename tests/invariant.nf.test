@@ -204,6 +204,204 @@ nextflow_pipeline {
         }
     }
 
+    test("--invariant_scope map holds the claim over mapped/ as well as the ledger, and both stay put under permutation (ADR-004)") {
+
+        // ADR-004: §6.1 joins link/links.parquet for person_id -- a statistic
+        // computed jointly across records, and the first value to reach a
+        // published artefact without passing through ledger.proposed.yaml.
+        // This scope is the COMPOSITION of the propose scope with that edge,
+        // so both artefacts are hashed and both must be single-valued.
+        //
+        // A HUNDRED replicates, the same count the first test of this file
+        // holds the proposer to. A map-scoped replicate re-runs profile ->
+        // link -> map on the permuted bytes, so this is ~1120 tasks against
+        // the propose scope's ~400 -- measured at 345s locally against 227s,
+        // which is a cost worth paying rather than a reason to shorten the
+        // range. bin/invariant_report.py names 'insufficient-permutations' as
+        // its own verdict precisely because shortening the range is the
+        // cheapest way to weaken this test, and a map scope certified on ten
+        // seeds beside a propose scope certified on a hundred would be a
+        // weaker claim wearing the same word, 'proof'.
+        setup {
+            new File("${baseDir}/tests/invariant/report.json").delete()
+        }
+
+        when {
+            params {
+                outdir                   = "$outputDir"
+                stop_after               = "map"
+                invariant_scope          = "map"
+                input                    = "$baseDir/test_data/fixtures/invariant_samplesheet.csv"
+                // The human gate. §5 is never re-run per replicate (it cannot
+                // be -- a permuted replicate's proposed ledger would fail
+                // CONFIRM_LEDGER's staleness check, correctly), so every
+                // replicate maps against the rules confirmed HERE, once,
+                // against the baseline.
+                confirmed_ledger         = "$baseDir/test_data/fixtures/confirm_ledger_invariant.yaml"
+                // The link fixture's own rule files. The invariant cohort set
+                // carries the same five identity fields precisely so these
+                // apply unchanged -- see make_fixtures.py's own note on why a
+                // second, re-cased copy would be two rule sets to keep in step.
+                blocking_rules           = "$baseDir/test_data/fixtures/link_blocking_rules.yaml"
+                link_comparison_spec     = "$baseDir/test_data/fixtures/link_comparisons.yaml"
+                permute_outcome_seed     = "1..100"
+                // Left at the pipeline default (100) rather than lowered to
+                // match: this run genuinely permutes a hundred times.
+                invariant_n_permutations = 100
+                // Most of this fixture's columns are identity fields that make
+                // §3 do real work and are not in assets/packs/minimal.yaml, so
+                // ~0.8 of its source values are unmapped BY CONSTRUCTION. The
+                // gate itself is tested on its own terms in
+                // tests/map_concepts.nf.test; raising it here is about letting
+                // this run reach the mapper at all.
+                max_unmapped_frac        = 0.9
+                max_failed_frac          = 0.5
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def report = new groovy.json.JsonSlurper()
+                .parse(new File("$baseDir/tests/invariant/report.json"))
+
+            assertAll(
+                {
+                    // The scope really was 'map', and the report says what it
+                    // held its claim over rather than leaving a reader to
+                    // infer it from a version of this file.
+                    assert report.scope == "map"
+                    assert report.scope_artefacts == ["ledger.proposed.yaml", "mapped/"]
+                },
+                {
+                    // The harness ran for real: every cohort permuted in every
+                    // replicate, every marginal preserved, no seed a no-op.
+                    assert report.n_permutations == 100
+                    assert report.n_seeds_requested == 100
+                    assert report.cohorts_without_outcome_column == []
+                    assert report.cohorts_with_incomplete_replicates == [:]
+                    assert report.marginal_moved == []
+                    assert report.no_op_permutations == []
+                },
+                {
+                    // Both artefacts exist for the BASELINE and for every
+                    // seed. 'null' is the baseline's key, and it is required:
+                    // replicates that agree with each other but not with the
+                    // run on the real data have shown the leak was
+                    // deterministic, not that there was none.
+                    assert report.missing_ledgers == []
+                    assert report.missing_mapped == []
+                    assert report.mapped_hashes.size() == 101
+                    assert report.mapped_hashes.containsKey("null")
+                },
+                {
+                    // The assertion itself, per artefact and composed.
+                    assert report.n_distinct_hashes_per_artefact.ledger == 1
+                    assert report.n_distinct_hashes_per_artefact.mapped == 1
+                    assert report.n_distinct_hashes == 1
+                    assert report.verdict == "proof"
+                },
+                {
+                    // NON-VACUITY 1: linkage actually linked. person_id cannot
+                    // be a function of the outcome if no linkage decision was
+                    // ever made -- a fixture of singleton clusters would go
+                    // green here while measuring nothing, which is the same
+                    // family of vacuity as the 'no-op-permutation' verdict.
+                    def linkReport = new groovy.json.JsonSlurper()
+                        .parse(new File("$outputDir/link/link_report.json"))
+                    assert linkReport.n_linked_pairs > 0 :
+                        "no pair was linked, so no person_id is a cluster and the §3 -> §6 edge is untested"
+                    assert linkReport.n_persons < linkReport.n_in :
+                        "every record is its own person, so linkage decided nothing"
+                },
+                {
+                    // NON-VACUITY 2: the mapped artefact has content. An empty
+                    // mapped/ would hash identically across every replicate
+                    // and report 'proof' -- 'no distinct hashes' and 'one
+                    // distinct hash' must not be the same observation.
+                    def read = { path ->
+                        def proc = ['python3', "${projectDir}/tests/fixtures/read_mapped.py", path].execute()
+                        def out = new StringBuilder(), err = new StringBuilder()
+                        proc.waitForProcessOutput(out, err)
+                        assert proc.exitValue() == 0 : "could not read ${path}: ${err}"
+                        new groovy.json.JsonSlurper().parseText(out.toString())
+                    }
+                    def person = read("$outputDir/mapped/person.parquet")
+                    assert person.rows.size() > 0
+                    assert person.rows.every { it.person_id != null }
+
+                    // NON-VACUITY 3: the OUTCOME column's values are inside
+                    // the digested artefact. §4.1 never proposes an
+                    // outcome-flagged column, so TIME_TO_EVENT has no rule and
+                    // its values land in _unmapped.parquet -- which ADR-004
+                    // puts inside the digest precisely so that a leak moving a
+                    // value between a domain table and the unmapped set cannot
+                    // be invisible. If they were absent, the permutation would
+                    // have nothing to move in the thing being hashed.
+                    def unmapped = read("$outputDir/mapped/_unmapped.parquet")
+                    assert unmapped.rows*.column.toSet().contains('TIME_TO_EVENT') :
+                        "the permuted column's values never reach mapped/, so the digest cannot see them move"
+                }
+            )
+        }
+    }
+
+    test("a map-scoped run that stops SHORT of map is reported as unmeasured, never as a proof") {
+
+        // The mirror of the scope-OVERRUN refusal below. Overrun is refused
+        // outright, because the later stages would run and publish under a
+        // verdict that never measured them. Stopping short is different: it
+        // is a legitimate thing to ask for (the propose half of the scope
+        // still runs, and its numbers are real), and the danger is only that
+        // the run might be READ as a proof of the whole scope. So the report
+        // names it instead -- 'no-mapped-artefact', with the missing
+        // replicates listed -- and the verdict is not 'proof'.
+        //
+        // Refusing this at the gate instead would also have made the existing
+        // '--stop_after profile' tests above illegal, and those measure the
+        // permutation mechanics rather than any proof.
+        setup {
+            new File("${baseDir}/tests/invariant/report.json").delete()
+        }
+
+        when {
+            params {
+                outdir                   = "$outputDir"
+                stop_after               = "propose"
+                invariant_scope          = "map"
+                input                    = "$baseDir/test_data/fixtures/invariant_samplesheet.csv"
+                permute_outcome_seed     = "1..10"
+                invariant_n_permutations = 10
+                max_failed_frac          = 0.5
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def report = new groovy.json.JsonSlurper()
+                .parse(new File("$baseDir/tests/invariant/report.json"))
+
+            assertAll(
+                {
+                    assert report.scope == "map"
+                    assert report.verdict == "no-mapped-artefact"
+                    assert report.verdict != "proof"
+                },
+                {
+                    // The ledger half genuinely ran and genuinely agreed --
+                    // which is exactly why the verdict has to come from the
+                    // MISSING half. A report that folded the two together
+                    // would show one distinct hash and read as a pass.
+                    assert report.missing_ledgers == []
+                    assert report.n_distinct_hashes_per_artefact.ledger == 1
+                    assert report.missing_mapped.size() == 11
+                    assert report.mapped_hashes == [:]
+                }
+            )
+        }
+    }
+
     test("the harness's stage-gate exemption covers only its own scope, not every later stage") {
         // The exemption exists because the harness's measurement IS which
         // contract output the unbuilt proposer failed to produce, so

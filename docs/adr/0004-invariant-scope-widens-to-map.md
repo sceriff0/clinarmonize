@@ -1,7 +1,9 @@
 # ADR-004 — The invariant's trigger condition has fired: §6 consumes §3
 
-* Status: **accepted; implementation outstanding** — `--invariant_scope map`
-  is still refused at run time until the wiring below lands
+* Status: **accepted and implemented** — `--invariant_scope map` runs, and
+  `tests/invariant.nf.test` holds it to 100 permutations. See
+  "Status: as wired" at the foot of this file for what landed and what it
+  cost.
 * Date: 2026-08-18
 * Section: §10.1, §0, §6.1
 * Supersedes in part: [ADR-003](0003-invariant-scope-is-the-proposer.md)
@@ -88,22 +90,68 @@ ordered canonically, with floats rounded at `ledger_float_precision`.
 `mapped/_unmapped.parquet` is inside the digest. A leak that moved a value
 between a domain table and the unmapped set would otherwise be invisible.
 
-## Status: why this is recorded before it is wired
+## Status: as wired
 
-The wiring is four new aliased process invocations, a per-replicate grouping
-of the link tables, and a change to what `INVARIANT_REPORT` consumes — a
-change to the single most load-bearing test in the repository. §10.1's own
-nogo is "never exclude a channel from the harness to make it pass", and a
-harness rushed into a weakened state is a worse outcome than a narrow one
-that is honest about being narrow.
+The decision above is implemented. What landed, and the two things that were
+learned doing it:
 
-Until it lands:
+**The wiring.** `LINK_BLOCKING`, `LINK_SCORE`, `LINK_RESOLVE` and
+`MAP_CONCEPTS` now carry a `replicate` key through their input and output
+tuples, the way `PROPOSE_*` already did, and are invoked a second time under
+`*_PERMUTED` aliases on the per-replicate permuted tables. A new
+`ARTEFACT_DIGEST` process (`bin/artefact_digest.py`) reduces one replicate's
+`mapped/` to the canonical digest described above; it is invoked ONCE over a
+channel carrying the baseline and every replicate, so no second call site can
+drift from the one that digested the run the replicates are compared against.
+`INVARIANT_REPORT` takes a second hash list, and a scope now names a LIST of
+artefacts whose per-replicate composite is what `n_distinct_hashes` counts —
+so `propose`'s numbers are byte-identical to what they were, and the map
+scope is a composition rather than a replacement.
 
-* `--invariant_scope map` is **still refused at run time**, with the
-  ADR-003 message. Nothing can report `[SUCCESS]` having measured a scope it
-  did not run.
-* The `propose` scope is unchanged and still green.
-* This is the **first task of the next session**, ahead of §6.2 and §6.3.
+**The baseline is inside the comparison.** The replicate set hashed is the
+seeds *plus* the unpermuted baseline (key `null`). This was already true of
+the propose scope, incidentally; it is now explicit and enforced by
+`missing_ledgers` / `missing_mapped`. Replicates that agree with each other
+but not with the run on the real data have shown the leak was deterministic,
+not that there was none.
 
-The trigger has fired and is written down where a reader can find it. That is
-the difference between a known gap and a forgotten one.
+**A run that stops SHORT of the scope is reported, not refused.** Overrun is
+refused outright — the later stages would run and publish under a verdict
+that never measured them. Stopping short is a legitimate request whose only
+danger is being *read* as a proof, so the report names it: verdict
+`no-mapped-artefact`, with the unmeasured replicates listed.
+
+### What building it found
+
+**A §3 defect the widening was written to catch, caught.** `record_id` was
+`'<dataset_id>#<row_number>'`, but §1.1 rejects only a duplicate
+`(cohort_id, dataset_id)` PAIR — so two cohorts each carrying a `clinical`
+dataset is a legal samplesheet, and `bin/link_score.py`'s flat `records` dict
+let the last table read answer for the first. On the two-cohort §10.1 fixture
+this scored 8 of 20 true pairs instead of 20, with `birth_date` agreeing (the
+cohorts share the value set) while `given` and `family` disagreed. The id is
+now `'<cohort_id>#<dataset_id>#<row_number>'` in all four places that build
+it. Nothing downstream of §3 had ever consumed a multi-cohort linkage before
+this change, which is precisely the argument for widening the scope: *every
+other check in this pipeline could pass with the invariant violated.*
+
+**The fixture had to be made able to link at all.** None of the invariant
+cohort set's columns was named by any blocking rule, so every record was a
+singleton cluster and `person_id` was a hash of one record id. A map-scoped
+run over that fixture would have gone green while measuring nothing —
+`person_id` cannot be a function of the outcome if no linkage decision is
+ever made. `tests/fixtures/make_fixtures.py` now gives the fixture the link
+fixture's own five identity fields (so its proven rule files apply
+unchanged), a non-match class so EM has two classes to fit, and one
+single-dataset cohort so both multi-record clusters and singletons are
+exercised. `tests/invariant.nf.test` asserts `n_persons < n_in` directly, so
+the fixture cannot quietly regress to singletons.
+
+### What it costs
+
+100 map-scoped replicates is ~1120 tasks and ~345s locally, against ~400
+tasks and ~227s for the propose scope. The committed test runs the full
+hundred: `bin/invariant_report.py` names `insufficient-permutations` as its
+own verdict because shortening the range is the cheapest way to weaken this
+test, and a map scope certified on ten seeds beside a propose scope certified
+on a hundred would be a weaker claim wearing the same word.

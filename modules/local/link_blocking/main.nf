@@ -22,23 +22,31 @@
 // (Global Constraint 1).
 //
 process LINK_BLOCKING {
-    tag "link:block"
+    tag "link:block:${replicate == null ? 'baseline' : 'p' + replicate}"
     label 'process_single'
 
     conda "${moduleDir}/environment.yml"
     container "docker.io/bolt3x/clinarmonize-duckdb@sha256:056f3260afbddaf99bfbd881b25f318b24ead3103bc626e4401e4f5afa03a7e0"
 
     input:
-    val   tables_json
+    // The REPLICATE key travels with the tables, exactly as it does through
+    // PROPOSE_CANDIDATES / PROPOSE_CHANNELS / PROPOSE_LEDGER. It is null for
+    // the baseline -- the real run -- and the seed for a §10.1 replicate
+    // (ADR-004 widened the harness to 'map', which needs link re-run per
+    // permuted replicate). Without it the three link processes could only be
+    // chained by channel POSITION, and a queue channel's order is task
+    // completion order: replicate 7's pairs would be scored against
+    // replicate 3's records the first time two tasks finished out of order.
+    tuple val(replicate), val(tables_json)
     path  blocking_rules
     val   outcome_variables_json
     val   max_block_size
     val   max_pairs_warn_frac
 
     output:
-    path "link/candidate_pairs.parquet", emit: pairs
-    path "link/blocking_report.json",    emit: report
-    path "versions.yml",                 emit: versions
+    tuple val(replicate), path("link/candidate_pairs.parquet"), emit: pairs
+    tuple val(replicate), path("link/blocking_report.json"),    emit: report
+    path "versions.yml",                                        emit: versions
 
     script:
     """

@@ -9,6 +9,16 @@
 // specificity. Without this, "the gate is on" was argued from code reading,
 // never observed.
 //
+// There are TWO controls here, one per wired scope, and the second is not
+// redundant. The first sabotages §4.2 and is caught through
+// ledger.proposed.yaml -- the artefact ADR-003 scoped the harness to. The
+// second sabotages §3.2 and is caught through mapped/ -- the artefact
+// ADR-004 ADDED, reached by the §3 -> §6 edge §6.1 opened. A leak in §3
+// leaves the ledger untouched (PROPOSE_CANDIDATES consumes profiles, not
+// links), so the propose scope cannot see it at all: the second test asserts
+// exactly that split, ledger unmoved and mapped/ moved. Widening a harness
+// and never observing the new half go red is the same as not widening it.
+//
 // Mechanism, fix round 2 (a real source file was never a safe place to do
 // this -- see below): setup{} copies the small subset of the real project a
 // plain `nextflow run` needs (main.nf, nextflow.config, nextflow_schema.json,
@@ -230,6 +240,209 @@ def EvidenceChannel_score(channel_id, column_profile, variable, params):
             // observed for the first time in this repo.
             assert report.n_distinct_hashes > 1
             assert report.verdict == 'leak'
+        }
+
+        cleanup {
+            if (copyRoot?.exists()) {
+                copyRoot.deleteDir()
+            }
+        }
+    }
+
+    test("deliberately making a pair's match weight a function of the outcome column makes the MAP scope report a leak, while the ledger stays put") {
+
+        // ADR-004's half of the negative control. The sabotage lives in
+        // §3.2, downstream of everything the propose scope measures:
+        //
+        //   * ledger.proposed.yaml is unaffected -- PROPOSE_CANDIDATES
+        //     consumes profiles, never links -- so the propose scope would
+        //     report `proof` on this very run. The test asserts that, because
+        //     "the old scope could already have caught this" is the one
+        //     objection that would make widening pointless.
+        //   * links.parquet IS affected: match weights move across
+        //     --match_threshold, clusters change, and person_id is a content
+        //     hash of a cluster's sorted membership. §6.1 joins that
+        //     person_id into every mapped row, so mapped/ moves with it.
+        //
+        // The sabotage is a per-PAIR perturbation drawn from the two records'
+        // own outcome values, not a constant shift: a constant would move
+        // every weight by the same amount and could leave the thresholding
+        // decisions -- the only thing that reaches person_id -- unchanged,
+        // which is the false negative fix round 1 of the test above hit.
+
+        def copyRoot
+
+        setup {
+            copyRoot = new File("${baseDir}/.leak_control_copy")
+            if (copyRoot.exists()) {
+                copyRoot.deleteDir()
+            }
+            copyRoot.mkdirs()
+
+            Runtime.getRuntime().addShutdownHook(new Thread({
+                if (copyRoot.exists()) {
+                    copyRoot.deleteDir()
+                }
+            }))
+
+            ['main.nf', 'nextflow.config', 'nextflow_schema.json', 'conf', 'modules', 'subworkflows', 'workflows', 'bin', 'assets'].each { name ->
+                def src = new File("${baseDir}/${name}")
+                def proc = ['cp', '-R', src.absolutePath, copyRoot.absolutePath].execute()
+                proc.waitFor()
+                if (proc.exitValue() != 0) {
+                    throw new RuntimeException("failed to copy '${name}' into the leak-control sandbox: ${proc.err.text}")
+                }
+            }
+
+            // Sabotage the COPY only. Same construction, same guarantees, and
+            // the same reasoning as the test above: the real bin/ is opened
+            // read-only, exactly once, to seed a gitignored scratch tree this
+            // test creates and destroys.
+            def linkScoreFile = new File(copyRoot, 'bin/link_score.py')
+            def originalText = linkScoreFile.text
+            def marker = 'if __name__ == "__main__":'
+            assert originalText.contains(marker) : 'bin/link_score.py no longer carries the expected anchor line -- update this test\'s insertion point.'
+
+            def sabotage = '''
+# ============================================================================
+# TEST-ONLY NEGATIVE CONTROL -- tests/invariant_leak_control.nf.test
+# Lives ONLY in the gitignored .leak_control_copy/ scratch tree this one
+# test creates and destroys. Never present in the real bin/, never
+# reachable from a normal `nextflow run .`.
+#
+# Makes a pair's match weight a function of the OUTCOME column's values on
+# the two records being compared. PERMUTE_OUTCOME shuffles which outcome
+# value sits on which row per seed, so the perturbation -- and therefore
+# which pairs cross --match_threshold, and therefore every person_id, and
+# therefore every mapped/ row -- becomes a genuine function of the outcome.
+#
+# +/- a large constant rather than a small nudge, and drawn PER PAIR rather
+# than once per run: thresholding is a step function, so a perturbation too
+# small to move a weight across --match_threshold changes no cluster and no
+# person_id, and a constant shift moves every weight together and can leave
+# the ORDER -- and so the decisions -- untouched.
+# ============================================================================
+import hashlib as _sabotage_hashlib
+
+_SABOTAGE_RECORDS = {}
+_SABOTAGE_ORIGINAL_LOAD = _load_records
+_SABOTAGE_ORIGINAL_SCORE = PairScorer_score
+
+
+def _sabotage_argv_value(flag):
+    for i, a in enumerate(sys.argv):
+        if a == flag and i + 1 < len(sys.argv):
+            return sys.argv[i + 1]
+    return None
+
+
+def _load_records(con, tables):
+    # The scorer is handed a comparison PATTERN, not the records it came
+    # from, so the raw values have to be stashed on the way past.
+    records, cohorts = _SABOTAGE_ORIGINAL_LOAD(con, tables)
+    _SABOTAGE_RECORDS.clear()
+    _SABOTAGE_RECORDS.update(records)
+    return records, cohorts
+
+
+def _sabotage_outcome_columns():
+    raw = _sabotage_argv_value("--outcome-variables")
+    if not raw:
+        return []
+    wanted = {_normalize(n) for n in json.loads(raw)}
+    seen = []
+    for record in _SABOTAGE_RECORDS.values():
+        for column in record:
+            if column.startswith("__"):
+                continue
+            if _normalize(column) in wanted and column not in seen:
+                seen.append(column)
+        break
+    return sorted(seen)
+
+
+def PairScorer_score(pattern, fields, m, u):
+    weight, per_field = _SABOTAGE_ORIGINAL_SCORE(pattern, fields, m, u)
+    columns = _sabotage_outcome_columns()
+    if not columns:
+        return weight, per_field
+    left = _SABOTAGE_RECORDS.get(pattern["__left"], {})
+    right = _SABOTAGE_RECORDS.get(pattern["__right"], {})
+    blob = "|".join(f"{left.get(c)!r}>{right.get(c)!r}" for c in columns)
+    digest = int(_sabotage_hashlib.sha256(blob.encode()).hexdigest(), 16)
+    return weight + (40.0 if digest % 2 else -40.0), per_field
+# ============================================================================
+# END TEST-ONLY NEGATIVE CONTROL
+# ============================================================================
+
+'''
+
+            linkScoreFile.text = originalText.replace(marker, sabotage + marker)
+        }
+
+        when {
+            params {
+                outdir                   = "$outputDir"
+                stop_after               = "map"
+                invariant_scope          = "map"
+                input                    = "$baseDir/test_data/fixtures/invariant_samplesheet.csv"
+                confirmed_ledger         = "$baseDir/test_data/fixtures/confirm_ledger_invariant.yaml"
+                blocking_rules           = "$baseDir/test_data/fixtures/link_blocking_rules.yaml"
+                link_comparison_spec     = "$baseDir/test_data/fixtures/link_comparisons.yaml"
+                // Ten seeds, matching the control above: this test observes a
+                // hash SPLIT, which one differing replicate already
+                // establishes. The 100-permutation claim is
+                // tests/invariant.nf.test's job, and n_permutations(10) below
+                // a default n_required(100) would report
+                // 'insufficient-permutations' before the hash count was ever
+                // reached -- hiding the very thing this test exists to see.
+                permute_outcome_seed     = "1..10"
+                invariant_n_permutations = 10
+                max_unmapped_frac        = 0.9
+                max_failed_frac          = 0.5
+            }
+        }
+
+        then {
+            // The run itself must still SUCCEED. The sabotage perturbs match
+            // weights; it does not corrupt a schema or crash a process. A
+            // workflow failure here would be a different bug, not the leak
+            // this test is built to observe.
+            assert workflow.success
+
+            def report = new groovy.json.JsonSlurper()
+                .parse(new File(copyRoot, 'tests/invariant/report.json'))
+
+            assertAll(
+                {
+                    // The harness ran for real, over the scope it claims.
+                    assert report.scope == "map"
+                    assert report.n_permutations == 10
+                    assert report.cohorts_without_outcome_column == []
+                    assert report.cohorts_with_incomplete_replicates == [:]
+                    assert report.marginal_moved == []
+                    assert report.no_op_permutations == []
+                    assert report.missing_ledgers == []
+                    assert report.missing_mapped == []
+                },
+                {
+                    // THE POINT. The proposer is untouched by a §3 sabotage,
+                    // so the artefact ADR-003 scoped the harness to does not
+                    // move -- a propose-scoped run of this same sabotage
+                    // would report 'proof'. Only the artefact ADR-004 added
+                    // sees it.
+                    assert report.n_distinct_hashes_per_artefact.ledger == 1 :
+                        "the §3.2 sabotage moved the ledger too, so this test no longer isolates the §3 -> §6 edge"
+                    assert report.n_distinct_hashes_per_artefact.mapped > 1 :
+                        "person_id was made a function of the outcome column and mapped/ did not move -- " +
+                        "the widened half of the scope is not actually measuring anything"
+                },
+                {
+                    // ...and the composed verdict is 'leak', not 'proof'.
+                    assert report.n_distinct_hashes > 1
+                    assert report.verdict == 'leak'
+                }
+            )
         }
 
         cleanup {

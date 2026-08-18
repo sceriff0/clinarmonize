@@ -2,8 +2,11 @@
 // §10.1 — the harness's verdict: tests/invariant/report.json.
 //
 // Contract (docs/steps/s10-1.md):
-//   IN   every replicate's permutation manifest + every replicate's
-//        sha256(ledger.proposed.yaml)
+//   IN   every replicate's permutation manifest + every replicate's hash
+//        of each artefact the scope holds its claim over: always
+//        sha256(ledger.proposed.yaml), and additionally the canonical
+//        content digest of mapped/ once --invariant_scope is 'map'
+//        (ADR-004; bin/artefact_digest.py computes it)
 //   OUT  tests/invariant/report.json  {n_permutations, n_distinct_hashes}
 //   SIDE none
 //
@@ -27,6 +30,11 @@ process INVARIANT_REPORT {
     input:
     path permutation_manifests, stageAs: 'permutations_in/*'
     val  ledger_hashes
+    // Empty unless the scope is 'map'. A SECOND val rather than one merged
+    // list because the report has to be able to say WHICH artefact moved --
+    // "the composite differs" is not an answer to "which stage leaked" --
+    // and a single list keyed only by replicate could not.
+    val  mapped_hashes
     // The RESOLVED seed list, not the raw --permute_outcome_seed spec.
     // parseSeedSpec() in workflows/harmonize.nf is this pipeline's only
     // parser for the card's `int or range`; handing the spec over here
@@ -45,6 +53,7 @@ process INVARIANT_REPORT {
     // Empty until §4 exists, which is what makes the harness report
     // no-ledger rather than a vacuous agreement across zero hashes.
     def ledger_args = ledger_hashes.collect { "--ledger-hash '${it}'" }.join(' ')
+    def mapped_args = mapped_hashes.collect { "--mapped-hash '${it}'" }.join(' ')
     """
     invariant_report.py \\
         --permutation-glob 'permutations_in/*.json' \\
@@ -52,7 +61,7 @@ process INVARIANT_REPORT {
         --n-required ${n_required} \\
         --scope '${scope}' \\
         --out-report report.json \\
-        ${ledger_args}
+        ${ledger_args} ${mapped_args}
 
     cat <<-END_VERSIONS > versions.yml
     "${task.process}":

@@ -359,7 +359,13 @@ def main(argv: list[str] | None = None) -> int:
             "SELECT count(*) FROM read_csv(?, header=true, all_varchar=true, sample_size=-1)", [spec["path"]]
         ).fetchone()[0]
         for index in range(1, int(n_rows) + 1):
-            record_id = f"{spec['dataset_id']}#{index}"
+            # '<cohort_id>#<dataset_id>#<row>', the construction
+            # bin/link_blocking.py and bin/link_score.py both use. The cohort
+            # is load-bearing here too: record_ids seeds the union-find below
+            # and cohort_of is a dict keyed on it, so a collision would both
+            # lose records from the denominator and put two cohorts' rows in
+            # one cluster.
+            record_id = f"{spec['cohort_id']}#{spec['dataset_id']}#{index}"
             record_ids.append(record_id)
             cohort_of[record_id] = spec["cohort_id"]
 

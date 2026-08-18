@@ -1,7 +1,7 @@
 ---
 # yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
 name: invariant_report
-description: Collect per-replicate ledger hashes and report whether the invariant held (section 10.1)
+description: Collect each replicate's scoped artefact hashes and report whether the invariant held (section 10.1, ADR-004)
 keywords:
   - invariant
   - report
@@ -22,7 +22,10 @@ input:
         ontologies: []
   - - ledger_hashes:
         type: list
-        description: One ledger hash per replicate
+        description: One ledger.proposed.yaml hash per replicate, baseline included
+  - - mapped_hashes:
+        type: list
+        description: One canonical mapped/ content digest per replicate; empty unless the scope is map
   - - seeds:
         type: list
         description: Resolved replicate seeds, already parsed by the workflow
@@ -31,7 +34,7 @@ input:
         description: Number of replicates that must be present for the report to be valid
   - - scope:
         type: string
-        description: Scope the invariant is asserted over
+        description: Scope the invariant is asserted over; names the list of artefacts hashed
 output:
   report:
     - - report.json:

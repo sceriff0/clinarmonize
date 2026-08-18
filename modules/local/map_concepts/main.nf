@@ -25,24 +25,38 @@
 // the same observation.
 //
 process MAP_CONCEPTS {
-    tag "map:concepts"
+    tag "map:concepts:${replicate == null ? 'baseline' : 'p' + replicate}"
     label 'process_single'
 
     conda "${moduleDir}/environment.yml"
     container "docker.io/bolt3x/clinarmonize-duckdb@sha256:056f3260afbddaf99bfbd881b25f318b24ead3103bc626e4401e4f5afa03a7e0"
 
     input:
-    val   tables_json
+    // [replicate, tables_json, links] as ONE tuple: ADR-004's map-scoped
+    // replicate re-runs profile -> link -> map on the permuted bytes, so the
+    // links joined here must provably be the ones THIS replicate's linkage
+    // produced. `ruleset` is deliberately NOT part of the tuple -- it is the
+    // BASELINE's ruleset for every replicate, which is the whole point of
+    // holding the rules fixed (ADR-004: §5 is a human gate and cannot be
+    // re-run per replicate, so re-deriving rules per replicate would
+    // re-measure the proposer's own claim and obscure the §3 -> §6 edge this
+    // scope exists for).
+    tuple val(replicate), val(tables_json), path(links)
     path  ruleset
-    path  links
     val   pack_variables_json
     val   vocabulary_release
     val   map_params_json
 
     output:
-    path "mapped/*.parquet",             emit: mapped
-    path "mapped/_unmapped.parquet",     emit: unmapped
-    path "versions.yml",                 emit: versions
+    // mapped/*.parquet ALREADY includes _unmapped.parquet, and that is not a
+    // duplication to be tidied away: `mapped` is the artefact ADR-004's
+    // digest is taken over, and the ADR is explicit that _unmapped.parquet is
+    // inside it ("a leak that moved a value between a domain table and the
+    // unmapped set would otherwise be invisible"). `unmapped` is the separate
+    // handle §6.1's own done-when needs.
+    tuple val(replicate), path("mapped/*.parquet"),         emit: mapped
+    tuple val(replicate), path("mapped/_unmapped.parquet"), emit: unmapped
+    path "versions.yml",                                    emit: versions
 
     script:
     """

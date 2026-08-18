@@ -172,7 +172,7 @@
                     "default": "propose",
                     "enum": ["propose", "map", "all"],
                     "description": "Stage the invariant harness holds the outcome-blindness claim over.",
-                    "help_text": "widening it is a design change, not a config tweak (\u00a710.1, ADR-003, docs/adr/). ADR-004 records that the 'map' trigger has fired (\u00a76.1 consumes link/links.parquet) and specifies the wiring; it is not yet wired, so 'map' is still refused at run time. \u00a78.3's standardized-difference forest legitimately reads outcome variables for REPORTING, so an end-to-end scope would fail honestly and then get relaxed. Only 'propose' is implemented.",
+                    "help_text": "widening it is a design change, not a config tweak (\u00a710.1, ADR-003, docs/adr/). 'propose' holds the claim over ledger.proposed.yaml alone (ADR-003). 'map' is the COMPOSITION of that with the \u00a73 -> \u00a76 edge \u00a76.1 opened: it additionally holds the claim over a canonical content digest of mapped/ (including _unmapped.parquet), and re-runs profile -> link -> map per permuted replicate against the BASELINE's ruleset, because \u00a75 is a human gate that cannot be re-run per replicate (ADR-004). It requires --stop_after map and a --confirmed_ledger; a run that stops short is reported 'no-mapped-artefact', never 'proof'. 'all' is NOT implemented and is refused at run time: \u00a78.3's standardized-difference forest legitimately reads outcome variables for REPORTING, so an end-to-end scope would fail honestly and then get relaxed.",
                     "fa_icon": "fas fa-crosshairs"
                 },
                 "blocking_rules": {

@@ -359,14 +359,23 @@ def PairScorer_score(pattern: dict, fields: list[dict], m: dict, u: dict) -> tup
 
 def _load_records(con: duckdb.DuckDBPyConnection, tables: list[dict]) -> tuple[dict, dict]:
     """Same record_id construction as bin/link_blocking.py --
-    '<dataset_id>#<row_number>' -- so a pair proposed there resolves here."""
+    '<cohort_id>#<dataset_id>#<row_number>' -- so a pair proposed there
+    resolves here.
+
+    `records` is a FLAT dict keyed by that id, which is exactly why the
+    cohort has to be inside it: without it, the last table read wins, and a
+    pair from one cohort is scored against another cohort's row. That is not
+    a hypothetical -- it is what the two-cohort §10.1 fixture produced the
+    first time ADR-004's map-scoped harness linked it, with `birth_date`
+    agreeing (the two cohorts share the value set) while `given` and `family`
+    disagreed."""
     records: dict[str, dict] = {}
     cohorts: dict[str, list[str]] = {}
     for spec in tables:
         rel = con.read_csv(spec["path"], header=True, all_varchar=True, sample_size=-1)
         columns = list(rel.columns)
         for index, row in enumerate(rel.fetchall(), start=1):
-            record_id = f"{spec['dataset_id']}#{index}"
+            record_id = f"{spec['cohort_id']}#{spec['dataset_id']}#{index}"
             records[record_id] = dict(zip(columns, row))
             records[record_id]["__cohort_id"] = spec["cohort_id"]
             cohorts.setdefault(spec["cohort_id"], []).append(record_id)

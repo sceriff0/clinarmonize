@@ -198,9 +198,12 @@ def _view_name(spec: dict) -> str:
 def _register_table(con: duckdb.DuckDBPyConnection, spec: dict) -> list[str]:
     """Stage one source table as a view carrying the record_id §3 assigned.
 
-    record_id is '<dataset_id>#<row_number>', the SAME construction
-    bin/link_blocking.py uses (and bin/link_score.py re-derives in Python),
-    because that is what links.parquet's source_row_id holds. It rests on
+    record_id is '<cohort_id>#<dataset_id>#<row_number>', the SAME
+    construction bin/link_blocking.py uses (and bin/link_score.py re-derives
+    in Python), because that is what links.parquet's source_row_id holds.
+    The cohort_id prefix is not decoration: record_person below is a flat
+    map keyed on this id, and two cohorts sharing a dataset_id is a legal
+    samplesheet (§1.1 rejects only a duplicate PAIR). It rests on
     duckdb's `preserve_insertion_order` (default true) making a CSV scan
     yield file order; with it off, three files in this repo would silently
     disagree about which row is which person. That is a §3 surface, not one
@@ -217,7 +220,7 @@ def _register_table(con: duckdb.DuckDBPyConnection, spec: dict) -> list[str]:
     con.register(raw, con.read_csv(spec["path"], header=True, all_varchar=True, sample_size=-1))
     con.execute(
         f"CREATE OR REPLACE VIEW {view} AS SELECT *, "
-        f"'{spec['dataset_id']}#' || CAST(row_number() OVER () AS VARCHAR) AS __record_id "
+        f"'{spec['cohort_id']}#{spec['dataset_id']}#' || CAST(row_number() OVER () AS VARCHAR) AS __record_id "
         f"FROM {raw}"
     )
     columns = [row[0] for row in con.execute(f"DESCRIBE {view}").fetchall() if row[0] != "__record_id"]

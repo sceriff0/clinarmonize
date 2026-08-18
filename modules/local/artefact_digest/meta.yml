@@ -1,0 +1,61 @@
+---
+# yaml-language-server: $schema=https://raw.githubusercontent.com/nf-core/modules/master/modules/meta-schema.json
+name: artefact_digest
+description: Canonical content digest of one replicate's published artefact directory (section 10.1, ADR-004)
+keywords:
+  - invariant
+  - digest
+  - determinism
+tools:
+  - python:
+      description: Interpreter running this module's script from bin/.
+      homepage: https://www.python.org
+      documentation: https://docs.python.org/3/
+      licence:
+        - PSF-2.0
+      identifier: ""
+  - duckdb:
+      description: Reads the parquet files back so the digest is over the data, not the encoding.
+      homepage: https://duckdb.org
+      documentation: https://duckdb.org/docs/
+      licence:
+        - MIT
+      identifier: ""
+input:
+  - - replicate:
+        type: integer
+        description: Replicate seed, or null for the baseline
+    - artefact_files:
+        type: file
+        description: Every parquet file of one replicate's artefact directory
+        pattern: "*.parquet"
+        ontologies: []
+  - - artefact_name:
+        type: string
+        description: What is being digested, recorded in the output
+  - - float_precision:
+        type: integer
+        description: Decimal places every float is rendered at (ledger_float_precision)
+output:
+  digest:
+    - - replicate:
+          type: integer
+          description: Replicate seed, or null for the baseline
+      - "*.json":
+          type: file
+          description: Artefact digest and its per-table breakdown
+          pattern: "*.json"
+          ontologies: []
+  versions:
+    - - ${task.process}:
+          type: string
+          description: The process the versions were collected from
+      - versions.yml:
+          type: file
+          description: File containing software versions
+          pattern: versions.yml
+          ontologies: []
+authors:
+  - "@bolt3x"
+maintainers:
+  - "@bolt3x"

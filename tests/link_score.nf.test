@@ -62,8 +62,12 @@ nextflow_pipeline {
 
             // REC001's pair: `middle` is MISSING on the encounter side.
             // REC002's pair: `middle` is present and DIFFERENT.
-            def missingPair = scores['encounter#1|registry#1']
-            def disagreePair = scores['encounter#2|registry#2']
+            // record_id is '<cohort_id>#<dataset_id>#<row>'. The cohort
+            // prefix is what keeps two cohorts that share a dataset_id --
+            // 'clinical' in both, a legal samplesheet under §1.1 -- from
+            // claiming one another's rows.
+            def missingPair = scores['COHORT_LINK#encounter#1|COHORT_LINK#registry#1']
+            def disagreePair = scores['COHORT_LINK#encounter#2|COHORT_LINK#registry#2']
 
             assertAll(
                 {

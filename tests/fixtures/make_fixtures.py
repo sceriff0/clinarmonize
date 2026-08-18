@@ -312,16 +312,97 @@ def invariant_fixture_tables(target_dir: Path) -> tuple[Path, Path, Path]:
 
     Every column is synthetic and domain-neutral (§10.3): no disease term,
     no gene symbol, no cohort name that means anything.
+
+    ------------------------------------------------------------------
+    The identity block, and why it is here (ADR-004)
+    ------------------------------------------------------------------
+
+    Every table also carries `block_key, given, middle, family,
+    birth_date` -- deliberately the SAME five field names, in the same
+    lower case, as the link fixture (link_fixture_tables above), so that
+    test_data/fixtures/link_blocking_rules.yaml and link_comparisons.yaml
+    apply to this cohort set unchanged. A second copy of those two files
+    with the headers re-cased would be two rule sets to keep in step, and
+    the one that drifted would drift silently.
+
+    Without them this fixture LINKS NOTHING: none of its columns is named
+    by assets/blocking_rules.yaml, so every record is a singleton cluster
+    and `person_id` is a hash of one record id. A map-scoped invariant run
+    over such a fixture would still go green, and would still be
+    measuring nothing -- person_id cannot be a function of the outcome if
+    no linkage decision is ever made. That is the same family of vacuity
+    as §10.1's `no-outcome-column` and `no-op-permutation` verdicts, and
+    tests/invariant.nf.test asserts against it directly (n_persons < n_in).
+
+    So the identity block is built to make the Fellegi-Sunter model do
+    real work:
+
+      * COHORT_A/clinical row i and COHORT_A/treatment row i are the SAME
+        person, sharing block_key, given, family and birth_date. That is
+        the true-match class.
+      * `middle` is perturbed across the pair -- missing on some rows, a
+        different initial on others, equal on the rest -- so the candidate
+        set is not a single spike of identical comparison vectors.
+      * COHORT_A/treatment carries two EXTRA records that share a
+        block_key with a clinical record and agree on nothing else. Those
+        are the non-match class: without genuine non-matches in the
+        candidate set the two-class mixture has one class, EM's m
+        collapses toward 1, and the match weight stops being an estimate
+        of anything (the same reason link_fixture_tables carries
+        REC090-093).
+      * COHORT_B has ONE dataset and pairwise-distinct keys, so its twelve
+        records stay singletons. The fixture therefore exercises both
+        halves of §3.3's output -- multi-record clusters and singletons --
+        which are the two shapes §6.1's person_id join has to handle.
     """
     tables_dir = target_dir / "tables"
     tables_dir.mkdir(parents=True, exist_ok=True)
 
-    def clinical_rows(n: int, id_column: str, first_id: int) -> list[list[str]]:
-        header = [id_column, "AGE_AT_INDEX", "SEX", "VITAL_STATUS", "TIME_TO_EVENT"]
+    letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+    def token(salt: int, i: int, length: int) -> str:
+        """A deterministic synthetic name. Deterministic because the whole
+        fixture has to be byte-reproducible -- a fixture regenerated with a
+        different RNG would move every ledger hash and every digest, and the
+        confirmed-ledger fixture's proposed_hash with them. Varied in its
+        FIRST characters because link_blocking_rules.yaml blocks on
+        substr(family, 1, 3): a family name generator whose output all shares
+        a prefix would collapse that rule into 'everyone, same birth_date',
+        which is a different rule from the one being exercised."""
+        return "".join(letters[(salt + i * (k * 5 + 3)) % 26] for k in range(length))
+
+    def identity(cohort_salt: int, i: int) -> dict[str, str]:
+        """The five link fields for person i of a cohort. Shared verbatim by
+        that person's records in every dataset of the cohort, which is what
+        makes them one person."""
+        return {
+            "block_key": f"IBK{cohort_salt}{i:02d}",
+            "given": token(cohort_salt, i, 3),
+            "middle": letters[(cohort_salt + i) % 26],
+            "family": token(cohort_salt + 11, i, 6),
+            # Distinct per person, so substr(family,1,3) + birth_date never
+            # blocks two different people together.
+            "birth_date": f"{1940 + i}-{1 + (i % 12):02d}-{1 + (i * 3) % 28:02d}",
+        }
+
+    def clinical_rows(n: int, id_column: str, first_id: int, cohort_salt: int) -> list[list[str]]:
+        header = [
+            id_column,
+            "AGE_AT_INDEX",
+            "SEX",
+            "VITAL_STATUS",
+            "TIME_TO_EVENT",
+            "block_key",
+            "given",
+            "middle",
+            "family",
+            "birth_date",
+        ]
         sexes = ["male", "female", "other", "unknown"]
         statuses = ["alive", "dead", "unknown"]
         rows = [header]
         for i in range(n):
+            ident = identity(cohort_salt, i)
             rows.append(
                 [
                     str(first_id + i),
@@ -332,20 +413,82 @@ def invariant_fixture_tables(target_dir: Path) -> tuple[Path, Path, Path]:
                     # them: an outcome column of one repeated value would
                     # make the permutation a silent no-op.
                     str(round(10.0 + i * 3.5, 1)),
+                    ident["block_key"],
+                    ident["given"],
+                    ident["middle"],
+                    ident["family"],
+                    ident["birth_date"],
                 ]
             )
         return rows
 
     a_clinical = tables_dir / "invariant_a_clinical.csv"
-    a_clinical.write_text("\n".join(",".join(r) for r in clinical_rows(20, "PATIENT_ID", 1)) + "\n")
+    a_clinical.write_text(
+        "\n".join(",".join(r) for r in clinical_rows(20, "PATIENT_ID", 1, 0)) + "\n"
+    )
 
     b_clinical = tables_dir / "invariant_b_clinical.csv"
-    b_clinical.write_text("\n".join(",".join(r) for r in clinical_rows(12, "SUBJECT_ID", 101)) + "\n")
+    b_clinical.write_text(
+        "\n".join(",".join(r) for r in clinical_rows(12, "SUBJECT_ID", 101, 7)) + "\n"
+    )
 
     a_treatment = tables_dir / "invariant_a_treatment.csv"
-    treatment = [["PATIENT_ID", "EXPOSURE_COUNT", "EXPOSURE_START_DAY"]]
+    treatment = [
+        [
+            "PATIENT_ID",
+            "EXPOSURE_COUNT",
+            "EXPOSURE_START_DAY",
+            "block_key",
+            "given",
+            "middle",
+            "family",
+            "birth_date",
+        ]
+    ]
     for i in range(20):
-        treatment.append([str(i + 1), str(1 + i % 3), str(i * 11)])
+        ident = identity(0, i)
+        # `middle` is the only field that ever disagrees across the pair:
+        # missing on every fifth record, a different initial on the next,
+        # equal elsewhere. Three comparison LEVELS observed in one candidate
+        # set, which is what §3.2's three-way handling needs to be exercised
+        # by a run rather than argued from the spec.
+        if i % 5 == 0:
+            middle = ""
+        elif i % 5 == 1:
+            middle = letters[(i + 13) % 26]
+        else:
+            middle = ident["middle"]
+        treatment.append(
+            [
+                str(i + 1),
+                str(1 + i % 3),
+                str(i * 11),
+                ident["block_key"],
+                ident["given"],
+                middle,
+                ident["family"],
+                ident["birth_date"],
+            ]
+        )
+    # The non-match class. Each shares a block_key with a clinical record --
+    # so it reaches §3.2 as a candidate -- and agrees with it on nothing
+    # else. Without these, every candidate pair is a true match, EM has one
+    # class to fit, and the match weight stops estimating anything.
+    for j, source in enumerate((0, 1)):
+        ident = identity(0, source)
+        other = identity(19, 40 + j)
+        treatment.append(
+            [
+                str(900 + j),
+                str(1 + j),
+                str(300 + j * 7),
+                ident["block_key"],
+                other["given"],
+                other["middle"],
+                other["family"],
+                other["birth_date"],
+            ]
+        )
     a_treatment.write_text("\n".join(",".join(r) for r in treatment) + "\n")
 
     return a_clinical, a_treatment, b_clinical
@@ -686,6 +829,90 @@ _RULES_FIXTURE_WEIGHT_ROW = {
 }
 
 
+# §10.1/ADR-004's own fixture (the map-scoped invariant test): the six
+# decisions the invariant cohort set actually proposes.
+#
+# The pack is assets/packs/omop_cdm53.yaml, NOT assets/packs/minimal.yaml.
+# nf-test.config sets `profile = "test"`, and conf/test.config sets
+# concept_pack to the OMOP CDM 5.3 pack -- so every test in tests/ that does
+# not override concept_pack is proposing against THAT pack, whatever the
+# pipeline's own default is. A confirmed ledger derived against minimal.yaml
+# matches four of these six rows to nothing and CONFIRM_LEDGER rejects the
+# whole file, correctly.
+#
+# proposed_hash is the sha256 of that fixture pair's ledger.proposed.yaml
+# under `-profile test --stop_after propose --max_failed_frac 0.5` (default
+# params otherwise) -- verified directly by running the pipeline once and
+# hashing the published file, the same method confirm_ledger_valid()'s
+# docstring describes. Change invariant_fixture_tables(),
+# assets/packs/omop_cdm53.yaml, or any §4 scoring param and this goes stale
+# ON PURPOSE: that is §5.1's staleness guard doing its job, and the
+# map-scoped invariant test then fails loudly rather than mapping against a
+# ruleset confirmed for different data.
+_INVARIANT_FIXTURE_HASH = "sha256:8f2508deac49f727df5b9a79a0b3e818f41f8af4db213426ef6bdccaba3e6d86"
+
+# (cohort_id, dataset_id, column, variable, concept_id, rationale).
+#
+# TIME_TO_EVENT is ABSENT and cannot be added: §4.1 refuses to propose an
+# outcome-flagged column, so §5 has nothing to confirm for it and
+# CONFIRM_LEDGER would reject the row as unmatched. Its values therefore
+# reach mapped/_unmapped.parquet on every replicate, which is exactly what
+# ADR-004's digest has to see stay put under permutation.
+#
+# `birth_date` IS here, and deliberately: it is one of the five identity
+# fields §3 links on, so confirming it puts a column that DRIVES linkage into
+# the mapped tables the digest covers. The concept ids are the reviewer's --
+# the pack declares concept_id 0 for every variable, so a human supplies them
+# at the gate, which is what §5.1 is for.
+_INVARIANT_CONFIRMED_ROWS = [
+    ("COHORT_A", "clinical", "SEX", "gender", 4001,
+     "value set matches gender's declared domain_values"),
+    ("COHORT_A", "clinical", "birth_date", "year_of_birth", 4002,
+     "an ISO date column; year_of_birth is the pack's only birth-related variable"),
+    ("COHORT_A", "treatment", "EXPOSURE_START_DAY", "visit_start_date", 4003,
+     "a day offset from the cohort index; the pack's only visit-timing variable"),
+    ("COHORT_A", "treatment", "birth_date", "year_of_birth", 4002,
+     "the same identity column as the clinical table's, carried on the treatment records"),
+    ("COHORT_B", "clinical", "SEX", "gender", 4001,
+     "value set matches gender's declared domain_values"),
+    ("COHORT_B", "clinical", "birth_date", "year_of_birth", 4002,
+     "an ISO date column; year_of_birth is the pack's only birth-related variable"),
+]
+
+
+def confirm_ledger_invariant(target_dir: Path) -> Path:
+    """The confirmed ledger the map-scoped §10.1 harness maps against.
+
+    ADR-004: a map-scoped replicate holds the rules FIXED at the baseline's
+    ruleset, because §5 is a human gate -- ledger.confirmed.yaml carries a
+    proposed_hash keyed to the BASELINE's ledger.proposed.yaml, and a permuted
+    replicate produces a different proposed ledger that CONFIRM_LEDGER would
+    (correctly) reject as stale. So this file is authored once, against the
+    unpermuted run, and every replicate maps with it.
+
+    Both cohorts and both datasets are covered. A ruleset naming only
+    COHORT_A would leave COHORT_B entirely unmapped, and the §3 -> §6 edge
+    this scope exists to measure would then be exercised on one cohort's
+    linkage only."""
+    rows = [
+        {
+            "cohort_id": cohort,
+            "dataset_id": dataset,
+            "column": column,
+            "decision": "accept",
+            "variable": variable,
+            "concept_id": concept_id,
+            "confirmed_by": "a.reviewer",
+            "rationale": rationale,
+            "proposed_hash": _INVARIANT_FIXTURE_HASH,
+        }
+        for cohort, dataset, column, variable, concept_id, rationale in _INVARIANT_CONFIRMED_ROWS
+    ]
+    path = target_dir / "confirm_ledger_invariant.yaml"
+    path.write_text(yaml.safe_dump(rows, sort_keys=False, default_flow_style=False))
+    return path
+
+
 def confirm_ledger_rules_order_a(target_dir: Path) -> Path:
     """The card's own done-when fixture, order A: SEX_CODE listed first."""
     path = target_dir / "confirm_ledger_rules_order_a.yaml"
@@ -934,6 +1161,7 @@ FIXTURES = [
     link_samplesheet,
     link_blocking_rules,
     link_comparisons,
+    confirm_ledger_invariant,
     link_outcome_blocking_rules,
 ]
 

@@ -20,25 +20,26 @@
 // same round-trip caveat LINK_SCORE's header states applies to it.
 //
 process LINK_RESOLVE {
-    tag "link:resolve"
+    tag "link:resolve:${replicate == null ? 'baseline' : 'p' + replicate}"
     label 'process_single'
 
     conda "${moduleDir}/environment.yml"
     container "docker.io/bolt3x/clinarmonize-duckdb@sha256:056f3260afbddaf99bfbd881b25f318b24ead3103bc626e4401e4f5afa03a7e0"
 
     input:
-    val   tables_json
-    path  scores
+    // [replicate, tables_json, scores] as ONE tuple -- see LINK_BLOCKING's
+    // note on why the three link processes are chained by KEY, not position.
+    tuple val(replicate), val(tables_json), path(scores)
     val   match_threshold
     val   clerical_threshold
     val   max_collapse_ratio_drop
 
     output:
-    path "link/links.parquet",        emit: links
-    path "link/match_histogram.png",  emit: histogram
-    path "link/link_report.json",     emit: report
-    path "link/clerical_review.json", emit: clerical
-    path "versions.yml",              emit: versions
+    tuple val(replicate), path("link/links.parquet"),        emit: links
+    tuple val(replicate), path("link/match_histogram.png"),  emit: histogram
+    tuple val(replicate), path("link/link_report.json"),     emit: report
+    tuple val(replicate), path("link/clerical_review.json"), emit: clerical
+    path "versions.yml",                                     emit: versions
 
     script:
     """

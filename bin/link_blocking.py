@@ -161,12 +161,20 @@ def _register_records(con: duckdb.DuckDBPyConnection, tables: list[dict]) -> lis
     """Load every dataset into one `records` view, keyed by
     (cohort_id, record_id), and return the union of their column names.
 
-    record_id is '<dataset_id>#<row_number>'. §3.1's IN slot is "a cohort's
-    datasets, one row per patient-record" and the samplesheet promises no
-    shared surrogate key across datasets, so the position within its own
-    table is the only identifier every record is guaranteed to have. It is
-    stable for a given input file, which is what §3.3's links.parquet needs
-    to point back at.
+    §3.1's IN slot is "a cohort's datasets, one row per patient-record" and
+    the samplesheet promises no shared surrogate key across datasets, so the
+    position within its own table is the only identifier every record is
+    guaranteed to have. It is stable for a given input file, which is what
+    §3.3's links.parquet needs to point back at.
+
+    record_id is '<cohort_id>#<dataset_id>#<row_number>'. The cohort is part
+    of it, and that is a correctness requirement rather than tidiness: §1.1
+    fails fast on a duplicate (cohort_id, dataset_id) and on NOTHING ELSE, so
+    two cohorts sharing a dataset_id -- 'clinical' in two cohorts is the
+    normal case, not a pathological one -- is a legal samplesheet. Keyed on
+    '<dataset_id>#<row>' alone, COHORT_B/clinical row 1 and COHORT_A/clinical
+    row 1 are the same key, and every consumer that keys a dict or a JOIN on
+    it silently reads one cohort's record for the other's.
     """
     all_columns: list[str] = []
     parts = []
@@ -195,7 +203,7 @@ def _register_records(con: duckdb.DuckDBPyConnection, tables: list[dict]) -> lis
             "SELECT "
             f"'{spec['cohort_id']}' AS cohort_id, "
             f"'{spec['dataset_id']}' AS dataset_id, "
-            f"'{spec['dataset_id']}#' || CAST(row_number() OVER () AS VARCHAR) AS record_id, "
+            f"'{spec['cohort_id']}#{spec['dataset_id']}#' || CAST(row_number() OVER () AS VARCHAR) AS record_id, "
             + ", ".join(projected)
             + f" FROM {view}"
         )

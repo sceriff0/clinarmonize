@@ -27,6 +27,21 @@ include { LINK_RESOLVE } from '../modules/local/link_resolve/main'
 include { CONFIRM_LEDGER } from '../modules/local/confirm_ledger/main'
 include { COMPILE_RULES } from '../modules/local/compile_rules/main'
 include { MAP_CONCEPTS } from '../modules/local/map_concepts/main'
+//
+// ADR-004 -- `--invariant_scope map` re-runs LINK and MAP on every permuted
+// replicate, through the SAME processes the baseline uses, under aliases.
+// Identical reasoning to PROFILE_COLUMNS_PERMUTED above: a purpose-built
+// "link for the test" module would be a path the invariant is not actually
+// tested on. §5 is NOT aliased and never re-runs -- it is a human gate, and
+// a map-scoped replicate holds the rules fixed at the BASELINE's ruleset,
+// which is what makes this measure the §3 -> §6 edge rather than re-measuring
+// the proposer's own claim.
+//
+include { LINK_BLOCKING as LINK_BLOCKING_PERMUTED } from '../modules/local/link_blocking/main'
+include { LINK_SCORE    as LINK_SCORE_PERMUTED    } from '../modules/local/link_score/main'
+include { LINK_RESOLVE  as LINK_RESOLVE_PERMUTED  } from '../modules/local/link_resolve/main'
+include { MAP_CONCEPTS  as MAP_CONCEPTS_PERMUTED  } from '../modules/local/map_concepts/main'
+include { ARTEFACT_DIGEST } from '../modules/local/artefact_digest/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -618,13 +633,13 @@ workflow CLINICALHARMONIZE {
     // The exemption is bound to the ONE stage the harness is declared to
     // hold its claim over -- invariant_scope -- and to nothing else. Any
     // other --stop_after keeps the gate, so `--permute_outcome_seed 1..100
-    // --stop_after emit` is still refused today, and `--stop_after map`
-    // (§4/§5 exist; §6+ do not) is still refused rather than reporting
-    // [SUCCESS] with 'map' never having run. The bypass covers exactly the
-    // measurement it was written for -- kept even though 'propose' itself
-    // is implemented as of Task 5a and so no longer NEEDS the bypass to
-    // pass this particular check; it stays live for when invariant_scope
-    // ever widens past 'propose'.
+    // --stop_after emit` is still refused today whatever the scope, and
+    // `--stop_after map` is allowed through only when the scope is 'map'
+    // (ADR-004) rather than reporting [SUCCESS] with the mapper never
+    // measured. The bypass covers exactly the measurement it was written
+    // for -- kept even though both wired scopes are now implemented stages
+    // and so no longer NEED it to pass this particular check; it stays live
+    // for whenever invariant_scope widens to a stage that is not.
     def isInvariantScopeRun = isInvariantRun && targetStage == invariant_scope
     if (!isInvariantScopeRun) {
         requireStageImplemented(targetStage)
@@ -656,13 +671,26 @@ workflow CLINICALHARMONIZE {
         error(
             "--permute_outcome_seed is set and --stop_after ${targetStage} runs PAST --invariant_scope " +
             "'${invariant_scope}'. The harness holds its claim over '${invariant_scope}' and nothing after it " +
-            "(ADR-003, docs/adr/0003-invariant-scope-is-the-proposer.md); the later stages would run, publish, " +
-            "and be covered by a [SUCCESS] that never measured them. Stop at '${invariant_scope}', or widen the " +
-            "scope once ADR-004's wiring lands."
+            "(ADR-003, docs/adr/0003-invariant-scope-is-the-proposer.md; ADR-004 for 'map'); the later stages " +
+            "would run, publish, and be covered by a [SUCCESS] that never measured them. Stop at " +
+            "'${invariant_scope}', or set --invariant_scope to a wired scope that reaches ${targetStage}."
         )
     }
-    if (isInvariantRun && invariant_scope != 'propose') {
-        error("--invariant_scope '${invariant_scope}' is not implemented. ADR-003 (docs/adr/0003-invariant-scope-is-the-proposer.md) scopes the harness to the proposer; widening it is a design change requiring a superseding ADR, not a config edit. ADR-004 (docs/adr/0004-invariant-scope-widens-to-map.md) records that the trigger for 'map' has FIRED -- §6.1 consumes link/links.parquet -- and specifies the wiring; until that wiring lands this refusal stays, so that no run can report success having measured a scope it did not run.")
+    //
+    // Which scopes this pipeline can actually MEASURE. The list is here and
+    // in bin/invariant_report.py's SCOPE_ARTEFACTS, and the two must agree:
+    // this one decides which stages RUN per replicate, that one decides
+    // which artefacts are HASHED, and a scope wired in one but not the other
+    // is exactly a [SUCCESS] over a claim nothing measured.
+    //
+    // 'all' stays refused. §8.3's standardized-difference forest legitimately
+    // reads outcome variables for REPORTING, so an end-to-end scope would go
+    // red honestly and then get relaxed -- and a harness that has been
+    // relaxed once is a harness nobody trusts again.
+    //
+    def implementedScopes = ['propose', 'map'] as Set
+    if (isInvariantRun && !(invariant_scope in implementedScopes)) {
+        error("--invariant_scope '${invariant_scope}' is not implemented (implemented: ${implementedScopes.sort().join(', ')}). Widening the harness is a design change requiring an ADR, not a config edit: ADR-003 (docs/adr/0003-invariant-scope-is-the-proposer.md) scopes it to the proposer and ADR-004 (docs/adr/0004-invariant-scope-widens-to-map.md) composes that with the §3 -> §6 edge §6.1 opened. Until a scope has both an ADR and its wiring, it stays refused, so that no run can report success having measured a scope it did not run.")
     }
 
     //
@@ -740,6 +768,13 @@ workflow CLINICALHARMONIZE {
     // block produces. Collected here, called on after the propose block.
     def ch_permutation_manifests = channel.empty()
 
+    // ADR-004 -- the permuted tables, re-keyed by replicate and collected
+    // into the one-JSON-document shape §3 and §6 both take. Assigned inside
+    // the harness block below and consumed by the map-scoped block far
+    // further down, for the same top-to-bottom-script reason
+    // ch_permutation_manifests is declared here rather than there.
+    def ch_permuted_tables_json = channel.empty()
+
     if (isInvariantRun) {
         PERMUTE_OUTCOME(ch_open, file(resolvePackPath(concept_pack)), seeds)
         ch_versions = ch_versions.mix(PERMUTE_OUTCOME.out.versions.first())
@@ -775,6 +810,21 @@ workflow CLINICALHARMONIZE {
         ch_versions = ch_versions.mix(PROFILE_COLUMNS_PERMUTED.out.versions.first())
 
         ch_permuted_profiles_by_replicate = PROFILE_COLUMNS_PERMUTED.out.profile.map { meta, f -> [meta.replicate, f] }
+
+        // ADR-004 -- the same document ch_link_tables_json builds for the
+        // baseline, one per REPLICATE. Built from ch_permuted (the re-keyed
+        // permuted tables) rather than from ch_open, which is the whole
+        // point: a map-scoped replicate links and maps the PERMUTED bytes.
+        //
+        // Sorted by (cohort_id, dataset_id) exactly as the baseline's is, so
+        // the JSON string a replicate hands to LINK_BLOCKING differs from the
+        // baseline's only in the paths -- never in the order of its entries,
+        // which would otherwise make the digest a function of which
+        // PERMUTE_OUTCOME task finished first.
+        ch_permuted_tables_json = ch_permuted
+            .map { meta, table -> [meta.replicate, [cohort_id: meta.cohort_id, dataset_id: meta.dataset_id, path: table.toString()]] }
+            .groupTuple()
+            .map { replicate, rows -> [replicate, groovy.json.JsonOutput.toJson(rows.sort { a, b -> (a.cohort_id + a.dataset_id) <=> (b.cohort_id + b.dataset_id) })] }
     }
 
     /*
@@ -782,18 +832,20 @@ workflow CLINICALHARMONIZE {
         §3 — link (s3-1 blocking, s3-2 scoring, s3-3 thresholding)
 
         Placed AFTER the profile block and BEFORE propose, matching
-        stageGraph()'s canonical order -- but note that nothing below feeds
-        anything above or below it in this workflow. §0.9's dependency
-        direction is that §2 feeds §4 while §3 feeds §6, and §6 is not
-        built; link's outputs are terminal for now.
+        stageGraph()'s canonical order -- and nothing here feeds the propose
+        block below it. §0.9's dependency direction is that §2 feeds §4 while
+        §3 feeds §6, so link's one consumer is the §6.1 block further down,
+        which joins links.parquet for person_id.
 
-        That is also why §10.1 does not widen in this change. The harness
-        measures ledger.proposed.yaml (invariant_scope == 'propose', ADR-003),
-        and no value computed here reaches the proposer: PROPOSE_CANDIDATES
-        consumes profiles, not links. §3 DOES compute joint statistics across
-        datasets -- m, u and match weights are exactly that -- so the moment
-        §6 consumes links.parquet, the invariant's scope has to widen with
-        it, in that change and not after it.
+        §3 computes joint statistics across datasets -- m, u and match
+        weights are exactly that -- and none of them reaches the proposer:
+        PROPOSE_CANDIDATES consumes profiles, not links. They DO reach §6.1,
+        which joins links.parquet for person_id, and that is the edge ADR-004
+        widened the harness across. Under `--invariant_scope map` these three
+        processes are re-run per permuted replicate under their _PERMUTED
+        aliases (see the harness block after §6.1 below), so the joint
+        statistics computed here are inside the measurement rather than
+        beside it.
 
         The invariant is nonetheless enforced inside this stage rather than
         deferred to that day: bin/link_blocking.py refuses a blocking rule
@@ -804,33 +856,54 @@ workflow CLINICALHARMONIZE {
         lowers the recall ceiling with nothing in any report to say so.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     */
+    // The pack's outcome-flagged variable NAMES -- the whole of what §3
+    // is told about the outcome, and only so that it can refuse to use
+    // it. Read from the same pack file loadPackForPropose() reads.
+    //
+    // Hoisted OUT of the link block (ADR-004): the map-scoped harness block
+    // further down invokes the same three link processes on permuted bytes
+    // and needs the identical value. Re-deriving it there would put a second
+    // reading of "which variable is the outcome" in this file, and the whole
+    // of Global Constraint 1 is that there is exactly one.
+    def packVariablesForLink = new org.yaml.snakeyaml.Yaml().load(file(resolvePackPath(concept_pack)).text).variables
+    def outcomeVariablesJson = groovy.json.JsonOutput.toJson(packVariablesForLink.findAll { it.outcome }*.name)
+    // Resolved here rather than at each call site, so the baseline and the
+    // permuted replicates provably read the SAME rule file and the SAME
+    // comparison spec. checkIfExists now fires on any run rather than only on
+    // one that reaches 'link' -- a misspelt --blocking_rules is a defect
+    // whether or not this particular invocation would have got as far as
+    // opening it.
+    def blockingRulesFile = file(resolvePackPath(blocking_rules), checkIfExists: true)
+    def comparisonSpecFile = file(resolvePackPath(link_comparison_spec), checkIfExists: true)
+
+    // The admitted tables, as one JSON document. ch_open is a channel and
+    // LINK_BLOCKING is a single whole-run task, so the channel has to be
+    // collected before it can be handed over -- .toList() rather than a
+    // per-item map, because blocking is inherently about the SET of
+    // records (there are no pairs inside one table alone).
+    //
+    // It stays downstream of the §1.2 seal: ch_open is the filtered
+    // channel, so a held-out dataset is never named in this JSON and
+    // therefore never read by any link process.
+    //
+    // Keyed by replicate -- null, the baseline -- for the same reason
+    // PROPOSE_LEDGER's channel is: the harness's permuted replicates travel
+    // the identical processes under an alias, and the key is what pairs each
+    // stage's output with the SAME replicate's input rather than with
+    // whichever task finished first. §6 reads it too, so it is built once
+    // here rather than once per block.
+    def ch_tables_json_by_replicate = ch_open
+        .map { meta, table -> [cohort_id: meta.cohort_id, dataset_id: meta.dataset_id, path: table.toString()] }
+        .toList()
+        .map { rows -> [null, groovy.json.JsonOutput.toJson(rows.sort { a, b -> (a.cohort_id + a.dataset_id) <=> (b.cohort_id + b.dataset_id) })] }
+
     def ch_links = channel.empty()
     def ch_link_report = channel.empty()
 
     if (graph.indexOf(graphStage) >= graph.indexOf('link')) {
-        // The admitted tables, as one JSON document. ch_open is a channel and
-        // LINK_BLOCKING is a single whole-run task, so the channel has to be
-        // collected before it can be handed over -- .toList() rather than a
-        // per-item map, because blocking is inherently about the SET of
-        // records (there are no pairs inside one table alone).
-        //
-        // It stays downstream of the §1.2 seal: ch_open is the filtered
-        // channel, so a held-out dataset is never named in this JSON and
-        // therefore never read by any link process.
-        def ch_link_tables_json = ch_open
-            .map { meta, table -> [cohort_id: meta.cohort_id, dataset_id: meta.dataset_id, path: table.toString()] }
-            .toList()
-            .map { rows -> groovy.json.JsonOutput.toJson(rows.sort { a, b -> (a.cohort_id + a.dataset_id) <=> (b.cohort_id + b.dataset_id) }) }
-
-        // The pack's outcome-flagged variable NAMES -- the whole of what §3
-        // is told about the outcome, and only so that it can refuse to use
-        // it. Read from the same pack file loadPackForPropose() reads.
-        def packVariablesForLink = new org.yaml.snakeyaml.Yaml().load(file(resolvePackPath(concept_pack)).text).variables
-        def outcomeVariablesJson = groovy.json.JsonOutput.toJson(packVariablesForLink.findAll { it.outcome }*.name)
-
         LINK_BLOCKING(
-            ch_link_tables_json,
-            file(resolvePackPath(blocking_rules), checkIfExists: true),
+            ch_tables_json_by_replicate,
+            blockingRulesFile,
             outcomeVariablesJson,
             max_block_size,
             max_pairs_warn_frac,
@@ -843,9 +916,8 @@ workflow CLINICALHARMONIZE {
         // graph-order check as 'link' and stops here.
         if (targetStage != 'block') {
             LINK_SCORE(
-                ch_link_tables_json,
-                LINK_BLOCKING.out.pairs,
-                file(resolvePackPath(link_comparison_spec), checkIfExists: true),
+                ch_tables_json_by_replicate.join(LINK_BLOCKING.out.pairs),
+                comparisonSpecFile,
                 outcomeVariablesJson,
                 link_em_iterations,
                 link_u_from_random_pairs,
@@ -854,8 +926,7 @@ workflow CLINICALHARMONIZE {
             ch_versions = ch_versions.mix(LINK_SCORE.out.versions)
 
             LINK_RESOLVE(
-                ch_link_tables_json,
-                LINK_SCORE.out.scores,
+                ch_tables_json_by_replicate.join(LINK_SCORE.out.scores),
                 match_threshold,
                 clerical_threshold,
                 max_collapse_ratio_drop,
@@ -1051,10 +1122,10 @@ workflow CLINICALHARMONIZE {
         second edge: links.parquet supplies person_id, and nothing else in
         the pipeline does.
 
-        That edge is what the phase-1 handoff flagged as the §10.1 trigger,
-        and it is why --invariant_scope is widened in this same change
-        rather than after it (see the isInvariantRun gate above and
-        docs/adr/0004-invariant-scope-map.md). The harness's claim now
+        That edge is what the phase-1 handoff flagged as the §10.1 trigger.
+        It is measured by --invariant_scope map, whose wiring is the block
+        immediately below this one (ADR-004,
+        docs/adr/0004-invariant-scope-widens-to-map.md): the harness's claim
         reaches the mapped tables, so a joint statistic computed in §3 and
         carried into §6 is inside the measurement rather than beside it.
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1062,30 +1133,134 @@ workflow CLINICALHARMONIZE {
     def ch_mapped = channel.empty()
     def ch_unmapped = channel.empty()
 
+    // Hoisted out of the map block for the same reason outcomeVariablesJson
+    // was hoisted out of the link block: the map-scoped harness below feeds
+    // MAP_CONCEPTS_PERMUTED the identical pack view and the identical params.
+    def (packVariablesForMap, vocabularyReleaseForMap) = loadPackForPropose(concept_pack)
+    def packVariablesForMapJson = groovy.json.JsonOutput.toJson(packVariablesForMap)
+    def mapParamsJson = buildMapParamsJson(cdm_version, cdm_domains, max_unmapped_frac, keep_source_concept)
+
     if (graph.indexOf(graphStage) >= graph.indexOf('map')) {
-        // The admitted tables as one JSON document, identical in shape and
-        // reasoning to the link block's own ch_link_tables_json above: a
-        // whole-run task, downstream of the §1.2 seal, so a held-out
-        // dataset is never named here and therefore never mapped.
-        def ch_map_tables_json = ch_open
-            .map { meta, table -> [cohort_id: meta.cohort_id, dataset_id: meta.dataset_id, path: table.toString()] }
-            .toList()
-            .map { rows -> groovy.json.JsonOutput.toJson(rows.sort { a, b -> (a.cohort_id + a.dataset_id) <=> (b.cohort_id + b.dataset_id) }) }
-
-        def (packVariablesForMap, vocabularyReleaseForMap) = loadPackForPropose(concept_pack)
-        def mapParamsJson = buildMapParamsJson(cdm_version, cdm_domains, max_unmapped_frac, keep_source_concept)
-
+        // The tables document and the links arrive as ONE tuple keyed by
+        // replicate (null here -- the baseline): §6 must map the bytes THIS
+        // replicate linked, and pairing them by channel position would be
+        // correct only for as long as there is exactly one replicate.
         MAP_CONCEPTS(
-            ch_map_tables_json,
+            ch_tables_json_by_replicate.join(ch_links),
             ch_ruleset,
-            ch_links,
-            groovy.json.JsonOutput.toJson(packVariablesForMap),
+            packVariablesForMapJson,
             vocabularyReleaseForMap,
             mapParamsJson,
         )
         ch_versions = ch_versions.mix(MAP_CONCEPTS.out.versions)
         ch_mapped = MAP_CONCEPTS.out.mapped
         ch_unmapped = MAP_CONCEPTS.out.unmapped
+    }
+
+    /*
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        §10.1 / ADR-004 — the map-scoped harness.
+
+        The trigger the phase-1 and phase-2 handoffs both named has fired:
+        §6.1 joins link/links.parquet for person_id, which is a statistic
+        computed jointly across records and the first value to reach a
+        published artefact without passing through ledger.proposed.yaml.
+        ADR-003's soundness argument does not cover it, so the harness's
+        claim widens to cover it instead.
+
+        What a map-scoped replicate runs, and what it deliberately does not:
+
+            permute the outcome column WITHIN each cohort   (unchanged)
+            profile the permuted tables                     PROFILE_COLUMNS_PERMUTED
+            link   the permuted tables                      LINK_*_PERMUTED
+            map    them against the BASELINE's ruleset      MAP_CONCEPTS_PERMUTED
+            digest mapped/ canonically                      ARTEFACT_DIGEST
+
+        §5 is NOT re-run. It is a human gate: ledger.confirmed.yaml carries a
+        proposed_hash keyed to the BASELINE's ledger.proposed.yaml, and a
+        permuted replicate produces a different proposed ledger, so
+        CONFIRM_LEDGER would reject it as stale -- correctly. There is no way
+        to confirm 100 permuted replicates and no honest way to fake it. So
+        the rules are held FIXED at the baseline's ruleset, and what varies is
+        exactly what flows through linkage into mapping: the newly-exposed
+        surface, and nothing else.
+
+        The ledger is still hashed per replicate as well (the propose scope is
+        composed into this one, never replaced by it -- bin/invariant_report.py
+        builds the composite). §6 leaking would not excuse §4 leaking.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    */
+    // "<replicate>=<canonical digest of mapped/>", one per replicate.
+    // channel.value([]) rather than channel.empty() so INVARIANT_REPORT still
+    // has a value to consume under the 'propose' scope: an empty CHANNEL on a
+    // val input would stall the process forever, and the harness's own report
+    // is the last thing that should be able to hang a run.
+    def ch_mapped_hashes = channel.value([])
+
+    if (isInvariantRun && invariant_scope == 'map' && graph.indexOf(graphStage) >= graph.indexOf('map')) {
+        // The baseline's ruleset, as a VALUE channel. ch_ruleset is a queue
+        // channel carrying exactly one item, and a queue channel pairs with a
+        // multi-item input ONCE -- the second replicate would wait forever
+        // for a second ruleset that never comes. .first() is what turns "one
+        // item" into "the same item for every replicate", and it is also the
+        // literal expression of ADR-004's rules-held-fixed decision.
+        def ch_baseline_ruleset = ch_ruleset.first()
+
+        LINK_BLOCKING_PERMUTED(
+            ch_permuted_tables_json,
+            blockingRulesFile,
+            outcomeVariablesJson,
+            max_block_size,
+            max_pairs_warn_frac,
+        )
+        ch_versions = ch_versions.mix(LINK_BLOCKING_PERMUTED.out.versions.first())
+
+        LINK_SCORE_PERMUTED(
+            ch_permuted_tables_json.join(LINK_BLOCKING_PERMUTED.out.pairs),
+            comparisonSpecFile,
+            outcomeVariablesJson,
+            link_em_iterations,
+            link_u_from_random_pairs,
+            link_random_pair_n,
+        )
+        ch_versions = ch_versions.mix(LINK_SCORE_PERMUTED.out.versions.first())
+
+        LINK_RESOLVE_PERMUTED(
+            ch_permuted_tables_json.join(LINK_SCORE_PERMUTED.out.scores),
+            match_threshold,
+            clerical_threshold,
+            max_collapse_ratio_drop,
+        )
+        ch_versions = ch_versions.mix(LINK_RESOLVE_PERMUTED.out.versions.first())
+
+        MAP_CONCEPTS_PERMUTED(
+            ch_permuted_tables_json.join(LINK_RESOLVE_PERMUTED.out.links),
+            ch_baseline_ruleset,
+            packVariablesForMapJson,
+            vocabularyReleaseForMap,
+            mapParamsJson,
+        )
+        ch_versions = ch_versions.mix(MAP_CONCEPTS_PERMUTED.out.versions.first())
+
+        // ONE invocation over the baseline AND every replicate, mixed into a
+        // single channel -- so there is no second call site whose code could
+        // differ from the one that digested the run the replicates are
+        // compared against. (The link and map stages needed aliases because
+        // their baseline invocation is a real pipeline stage that publishes
+        // results; this process exists only for the harness, so it does not.)
+        ARTEFACT_DIGEST(
+            ch_mapped.mix(MAP_CONCEPTS_PERMUTED.out.mapped),
+            'mapped/',
+            ledger_float_precision,
+        )
+        ch_versions = ch_versions.mix(ARTEFACT_DIGEST.out.versions.first())
+
+        // Read out of the digest JSON in Groovy, the same way ch_confirmed is
+        // read out of ruleset.json above: the process has already completed
+        // by the time this map() sees its output, so the file is on disk.
+        ch_mapped_hashes = ARTEFACT_DIGEST.out.digest
+            .map { replicate, digestFile -> "${replicate}=${new groovy.json.JsonSlurper().parse(digestFile).digest}" }
+            .toSortedList()
     }
 
     //
@@ -1110,6 +1285,13 @@ workflow CLINICALHARMONIZE {
             // them would force a rename that loses the only thing the
             // report needs them keyed by -- which replicate produced which.
             ch_ledgers.map { replicate, ledger -> "${replicate}=${sha256Hex(ledger.bytes)}" }.toSortedList(),
+            // ADR-004 -- the second artefact of the composed 'map' scope, and
+            // an empty list under 'propose'. NOT hashed in Groovy the way the
+            // ledgers just above are: mapped/ is parquet, whose BYTES carry
+            // writer metadata, compression choices and row-group boundaries,
+            // none of which are the data. ARTEFACT_DIGEST reads it back
+            // through duckdb instead (bin/artefact_digest.py).
+            ch_mapped_hashes,
             // The resolved seed list, not the raw spec: parseSeedSpec()
             // above is the pipeline's only parser for `int or range`.
             seeds,
@@ -1125,8 +1307,8 @@ workflow CLINICALHARMONIZE {
     candidates = ch_candidates     // channel: [ val(replicate), path(candidates.parquet) ] (§4.1; replicate is null for the baseline)
     evidence   = ch_evidence       // channel: [ val(replicate), path(evidence.parquet) ] (§4.2; replicate is null for the baseline)
     ledger     = ch_ledgers        // channel: [ val(replicate), path(ledger.proposed.yaml) ] (§4.3; replicate is null for the baseline)
-    links      = ch_links          // channel: [ path(links.parquet) ] (§3.3)
-    link_report = ch_link_report   // channel: [ path(link_report.json) ] (§3.3)
+    links      = ch_links          // channel: [ val(replicate), path(links.parquet) ] (§3.3; replicate is null for the baseline)
+    link_report = ch_link_report   // channel: [ val(replicate), path(link_report.json) ] (§3.3; replicate is null for the baseline)
     confirmed  = ch_confirmed      // channel: [ cohort_id, dataset_id, column, variable, concept_id, rule_id ] (§5.1/§5.2)
     versions   = ch_versions       // channel: [ path(versions.yml) ]
 }
