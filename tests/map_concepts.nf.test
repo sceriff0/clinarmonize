@@ -1,0 +1,268 @@
+// §6.1 — apply concept mappings into OMOP rows.
+//
+// The card's own done-when (docs/steps/s6-1.md):
+//
+//     nextflow run . -profile test,docker --stop_after map
+//     duckdb -c "select count(*) from 'results/mapped/measurement.parquet'
+//                where measurement_source_concept_id is null"
+//
+//     That count is zero, and _unmapped.parquet exists even when empty.
+//
+// Why this file does NOT use `-profile test` literally. §5.1's human gate
+// refuses to pass 'confirm' without a real, human-authored
+// --confirmed_ledger, under every profile including test (see
+// workflows/harmonize.nf's own comment on that gate: there is deliberately
+// no flag anywhere that can supply a Decision instead). 'map' sits AFTER
+// 'confirm' in §0.9's graph, so no run can reach it without one. The
+// fixture pair is therefore §4.1's own generic pack plus §5.2's already-
+// green confirmed ledger -- the same pair tests/rules_stable.nf.test uses,
+// whose ruleset.json is the literal IN slot of this card:
+//
+//     SEX_CODE  -> sex     (domain person,      concept_id 100)
+//     WEIGHT_KG -> weight  (domain measurement, concept_id 200, unit_in kg)
+//
+// and whose other two columns (STUDY_OUTCOME, UNRELATED_NOISE_COLUMN) carry
+// no rule at all, so they exercise the _unmapped side in the same run.
+//
+// Run once before this test:
+//   python3 tests/fixtures/make_fixtures.py
+//   nf-test test tests/map_concepts.nf.test
+
+nextflow_pipeline {
+
+    name "§6.1 — apply concept mappings into OMOP rows"
+    script "../main.nf"
+    tag "pipeline"
+    tag "map"
+
+    test("every mapped row carries its source concept id, and _unmapped.parquet exists even when empty (§6.1 done-when)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/propose_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_rules_order_a.yaml"
+                // Two of the fixture's four columns carry no confirmed rule
+                // (STUDY_OUTCOME, UNRELATED_NOISE_COLUMN), so half of its
+                // source values are unmapped BY CONSTRUCTION. The default
+                // 0.2 is asserted separately below, on its own run: this one
+                // is about the mapped rows, and a gate firing here would
+                // prove nothing about them.
+                max_unmapped_frac = 0.6
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def read = { path ->
+                def proc = ['python3', "${projectDir}/tests/fixtures/read_mapped.py", path].execute()
+                def out = new StringBuilder(), err = new StringBuilder()
+                proc.waitForProcessOutput(out, err)
+                assert proc.exitValue() == 0 : "could not read ${path}: ${err}"
+                new groovy.json.JsonSlurper().parseText(out.toString())
+            }
+
+            def measurement = read("${params.outdir}/mapped/measurement.parquet")
+            def person = read("${params.outdir}/mapped/person.parquet")
+
+            assertAll(
+                {
+                    // The done-when's literal duckdb query, as an assertion
+                    // over the same column. Zero, and non-vacuously so --
+                    // a file with no rows would also report zero nulls.
+                    assert measurement.rows.size() > 0 :
+                        "measurement.parquet is empty, so 'zero nulls' says nothing"
+                    assert measurement.rows.every { it.measurement_source_concept_id != null } :
+                        "a mapped row carries no source concept id, so --audit cannot walk back " +
+                        "from the standard concept to what the source actually recorded (§6.1 Trap)"
+                },
+                {
+                    // "_unmapped.parquet exists even when empty" -- the
+                    // second half of the done-when, and the half a mapper
+                    // that only writes files it has rows for would fail.
+                    assert file("${params.outdir}/mapped/_unmapped.parquet").exists()
+                },
+                {
+                    // §6.1 Contract, in full. Both ids are kept, and the
+                    // Trap is precisely dropping the second one once the
+                    // standard concept is found.
+                    ['person_id', 'cohort_id',
+                     'measurement_concept_id', 'measurement_source_value',
+                     'measurement_source_concept_id', 'measurement_datetime',
+                     'rule_id', 'rule_version'].each { column ->
+                        assert measurement.columns.contains(column) :
+                            "measurement.parquet has no ${column} column; the Contract names it"
+                    }
+                },
+                {
+                    // The standard concept is the one the confirmed rule
+                    // named -- read from ruleset.json, never re-derived.
+                    assert measurement.rows.every { it.measurement_concept_id == 200 } :
+                        "the standard concept is not the one WEIGHT_KG's confirmed rule names"
+                    assert person.rows.every { it.person_concept_id == 100 }
+                },
+                {
+                    // The source value is VERBATIM. The fixture's weights
+                    // are 50..61 as written by make_fixtures.py, so a
+                    // reformatted or re-typed value shows up here.
+                    def sourceValues = measurement.rows*.measurement_source_value.toSet()
+                    assert sourceValues == (50..61).collect { it.toString() }.toSet() :
+                        "measurement_source_value is not the verbatim source string: ${sourceValues}"
+                },
+                {
+                    // Every row names the rule that produced it (§5.2's Why:
+                    // provenance requires that every emitted cell name its
+                    // rule). rule_id is READ from ruleset.json, so it must be
+                    // the content hash tests/rules_stable.nf.test pins.
+                    assert measurement.rows.every {
+                        it.rule_id == 'R-12dce2fe7e153d9dc3456b4c2830e69c772324082c0b0e53ca3dee16a935d5d9'
+                    } : "measurement rows do not carry WEIGHT_KG's own content-hash rule_id"
+                    assert person.rows.every {
+                        it.rule_id == 'R-f20c4a8dbab7517246af57c820459a85b2857be32cda7db0a66e87253aff627a'
+                    }
+                    assert measurement.rows.every { it.rule_version == '0.1.0' }
+                },
+                {
+                    // person_id comes from §3.3's links.parquet and from
+                    // nowhere else -- §6 does not re-resolve identity. Every
+                    // fixture record is a singleton cluster (no blocking rule
+                    // applies), so all twelve are present and distinct.
+                    assert measurement.rows.every { it.person_id != null }
+                    assert measurement.rows*.person_id.toSet().size() == 12 :
+                        "twelve unlinked source records did not yield twelve persons"
+                }
+            )
+        }
+    }
+
+    test("a source value with no standard concept is written to _unmapped.parquet, never given an invented id (§6.1 nogo)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/propose_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_rules_order_a.yaml"
+                max_unmapped_frac = 0.6
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def proc = ['python3', "${projectDir}/tests/fixtures/read_mapped.py",
+                        "${params.outdir}/mapped/_unmapped.parquet"].execute()
+            def out = new StringBuilder(), err = new StringBuilder()
+            proc.waitForProcessOutput(out, err)
+            assert proc.exitValue() == 0 : "could not read _unmapped.parquet: ${err}"
+            def unmapped = new groovy.json.JsonSlurper().parseText(out.toString())
+
+            assertAll(
+                {
+                    // UNRELATED_NOISE_COLUMN carries no confirmed rule, so
+                    // none of its values has a standard concept. The nogo is
+                    // that they are RECORDED, not invented and not dropped:
+                    // a value that silently vanishes between ingest and
+                    // mapped/ is indistinguishable from one that was never
+                    // there.
+                    def columns = unmapped.rows*.column.toSet()
+                    assert columns.contains('UNRELATED_NOISE_COLUMN') :
+                        "an unmappable column's values were dropped rather than recorded: ${columns}"
+                },
+                {
+                    // And they are not hiding in a domain table under a
+                    // fabricated concept id.
+                    def mapped = ['person', 'measurement'].collect { table ->
+                        def p = ['python3', "${projectDir}/tests/fixtures/read_mapped.py",
+                                 "${params.outdir}/mapped/${table}.parquet"].execute()
+                        def o = new StringBuilder(), e = new StringBuilder()
+                        p.waitForProcessOutput(o, e)
+                        new groovy.json.JsonSlurper().parseText(o.toString()).rows
+                    }.flatten()
+                    assert mapped.every { it.rule_id != null } :
+                        "a mapped row names no rule, so it was written without one"
+                },
+                {
+                    // The outcome-flagged variable's own column is unmapped
+                    // too -- §4.1 never proposes it (Global Constraint 1), so
+                    // no rule can exist for it and §6 has nothing to apply.
+                    // It is RECORDED, not silently discarded: the invariant
+                    // forbids the outcome driving a decision, not the outcome
+                    // being carried.
+                    assert unmapped.rows*.column.toSet().contains('STUDY_OUTCOME')
+                }
+            )
+        }
+    }
+
+    test("more unmapped values than max_unmapped_frac allows stops the run (§6.1 Params)") {
+
+        when {
+            params {
+                outdir            = "$outputDir"
+                stop_after        = "map"
+                input             = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack      = "$baseDir/test_data/fixtures/propose_pack.yaml"
+                confirmed_ledger  = "$baseDir/test_data/fixtures/confirm_ledger_rules_order_a.yaml"
+                // The card's own default. Two of four fixture columns are
+                // unmapped, so the observed fraction is 0.5 -- well above it.
+                max_unmapped_frac = 0.2
+            }
+        }
+
+        then {
+            assert !workflow.success
+            def report = (workflow.stdout + workflow.stderr).join('\n') + (workflow.errorReport ?: '')
+            assert report.contains('max_unmapped_frac') :
+                "the run stopped without naming the gate that stopped it"
+        }
+    }
+
+    test("keep_source_concept = false drops the pre-translation concept, and says that it breaks --audit (§6.1 Params)") {
+
+        when {
+            params {
+                outdir              = "$outputDir"
+                stop_after          = "map"
+                input               = "$baseDir/test_data/fixtures/propose_samplesheet.csv"
+                concept_pack        = "$baseDir/test_data/fixtures/propose_pack.yaml"
+                confirmed_ledger    = "$baseDir/test_data/fixtures/confirm_ledger_rules_order_a.yaml"
+                max_unmapped_frac   = 0.6
+                keep_source_concept = false
+            }
+        }
+
+        then {
+            assert workflow.success
+
+            def proc = ['python3', "${projectDir}/tests/fixtures/read_mapped.py",
+                        "${params.outdir}/mapped/measurement.parquet"].execute()
+            def out = new StringBuilder(), err = new StringBuilder()
+            proc.waitForProcessOutput(out, err)
+            def measurement = new groovy.json.JsonSlurper().parseText(out.toString())
+
+            assertAll(
+                {
+                    // The param's declared effect, literally: "retains the
+                    // pre-translation concept; turning it off breaks --audit".
+                    // The column is GONE, not nulled -- a null column would
+                    // still pass the done-when's `is null` count as zero rows
+                    // of a table nobody can audit.
+                    assert !measurement.columns.contains('measurement_source_concept_id')
+                },
+                {
+                    // Everything else survives. Turning off the source
+                    // concept is a documented loss of auditability, not a
+                    // different output shape.
+                    assert measurement.columns.contains('measurement_concept_id')
+                    assert measurement.columns.contains('measurement_source_value')
+                    assert measurement.rows.size() == 12
+                }
+            )
+        }
+    }
+}

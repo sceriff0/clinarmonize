@@ -26,14 +26,15 @@ include { LINK_SCORE } from '../modules/local/link_score/main'
 include { LINK_RESOLVE } from '../modules/local/link_resolve/main'
 include { CONFIRM_LEDGER } from '../modules/local/confirm_ledger/main'
 include { COMPILE_RULES } from '../modules/local/compile_rules/main'
+include { MAP_CONCEPTS } from '../modules/local/map_concepts/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     THE NINE-STAGE GRAPH (§0.9)
 
-    'ingest', 'profile', 'link', 'propose' and 'confirm' are implemented. A
-    run that tries to reach any other stage fails with a clear message
-    instead of silently succeeding as if that stage had run.
+    'ingest', 'profile', 'link', 'propose', 'confirm' and 'map' are
+    implemented. A run that tries to reach any other stage fails with a
+    clear message instead of silently succeeding as if that stage had run.
 
     implementedStages() was NOT a contiguous prefix of stageGraph() for the
     whole of phase 0: 'link' (§3) was unbuilt while 'propose' (§4), which
@@ -44,11 +45,11 @@ include { COMPILE_RULES } from '../modules/local/compile_rules/main'
     checks the REQUESTED stage's own membership rather than walking the
     graph for the first gap.
 
-    §3 is now built, so the set happens to be contiguous again -- and the
-    mechanism stays exactly as it was. It is not an accident to be tidied
-    away: §6-§9 are unbuilt, and the identical situation recurs the moment
-    any later stage is built out of graph order. Do not "fix" this into a
-    prefix walk.
+    §3 and §6.1 are now built, so the set happens to be contiguous again --
+    and the mechanism stays exactly as it was. It is not an accident to be
+    tidied away: §7-§9 are unbuilt, and the identical situation recurs the
+    moment any later stage is built out of graph order. Do not "fix" this
+    into a prefix walk.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 def stageGraph() {
@@ -56,7 +57,7 @@ def stageGraph() {
 }
 
 def implementedStages() {
-    return ['ingest', 'profile', 'link', 'propose', 'confirm'] as Set
+    return ['ingest', 'profile', 'link', 'propose', 'confirm', 'map'] as Set
 }
 
 //
@@ -392,6 +393,21 @@ def buildCompileParamsJson(String ruleIdPrefix, Boolean failOnRuleCollision) {
     ])
 }
 
+//
+// §6.1's four Params rows, as one JSON object -- same shape and reasoning
+// as the propose/confirm/compile bundles above: one quoted argument per
+// stage rather than four positional flags a reordering could silently
+// transpose.
+//
+def buildMapParamsJson(String cdmVersion, List cdmDomains, Number maxUnmappedFrac, Boolean keepSourceConcept) {
+    return groovy.json.JsonOutput.toJson([
+        cdm_version        : cdmVersion,
+        cdm_domains        : cdmDomains,
+        max_unmapped_frac  : maxUnmappedFrac,
+        keep_source_concept: keepSourceConcept,
+    ])
+}
+
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     §10.1 — the outcome-permutation harness
@@ -527,6 +543,10 @@ workflow CLINICALHARMONIZE {
     allow_stale_ledger      // boolean: escape hatch for a stale proposed_hash, logged loudly (§5.1)
     rule_id_prefix          // string:  cosmetic prefix; stability comes from the content hash (§5.2)
     fail_on_rule_collision  // boolean: two rules writing the same target cell is a defect, not a merge (§5.2)
+    cdm_version             // string:  target OMOP CDM release; validated and recorded, nothing branches on it (§6.1)
+    cdm_domains             // list:    the five-table subset emitted; never a claim of full conformance (§6.1)
+    max_unmapped_frac       // number:  above this fraction of source values unmapped, the run fails (§6.1)
+    keep_source_concept     // boolean: retains the pre-translation concept; off breaks --audit (§6.1)
     outdir                 // string:  output directory
 
     main:
@@ -612,8 +632,37 @@ workflow CLINICALHARMONIZE {
     if (isInvariantRun && graph.indexOf(graphStage) < graph.indexOf('profile')) {
         error("--permute_outcome_seed needs a run that reaches at least 'profile'; --stop_after ${targetStage} stops before a permuted table is ever read, so the permutation could not affect anything.")
     }
+    //
+    // A seeded run may not be aimed PAST the scope the harness measures.
+    //
+    // This property used to hold by accident. Until §6.1, 'map' was
+    // unimplemented, so requireStageImplemented() refused
+    // `--permute_outcome_seed 1..100 --stop_after map` on its way past --
+    // and tests/invariant.nf.test asserted exactly that refusal. Building
+    // §6.1 made 'map' implemented and the refusal silently disappeared:
+    // the run went all the way through the mapper while INVARIANT_REPORT
+    // still measured nothing but ledger.proposed.yaml, and reported
+    // [SUCCESS].
+    //
+    // That is the failure ADR-003's enum-refusal exists to prevent, arriving
+    // through the other door. Stages after invariant_scope RUN and PUBLISH
+    // on such a run, and the harness's verdict says nothing whatever about
+    // them -- a reader who asked for `--stop_after map` and got a green
+    // invariant report would reasonably conclude the mapper had been
+    // measured. So the check is now explicit and no longer a function of
+    // which stages happen to be built.
+    //
+    if (isInvariantRun && graph.indexOf(graphStage) > graph.indexOf(invariant_scope)) {
+        error(
+            "--permute_outcome_seed is set and --stop_after ${targetStage} runs PAST --invariant_scope " +
+            "'${invariant_scope}'. The harness holds its claim over '${invariant_scope}' and nothing after it " +
+            "(ADR-003, docs/adr/0003-invariant-scope-is-the-proposer.md); the later stages would run, publish, " +
+            "and be covered by a [SUCCESS] that never measured them. Stop at '${invariant_scope}', or widen the " +
+            "scope once ADR-004's wiring lands."
+        )
+    }
     if (isInvariantRun && invariant_scope != 'propose') {
-        error("--invariant_scope '${invariant_scope}' is not implemented. ADR-003 scopes the harness to the proposer; widening it is a design change requiring a superseding ADR, not a config edit.")
+        error("--invariant_scope '${invariant_scope}' is not implemented. ADR-003 (docs/adr/0003-invariant-scope-is-the-proposer.md) scopes the harness to the proposer; widening it is a design change requiring a superseding ADR, not a config edit. ADR-004 (docs/adr/0004-invariant-scope-widens-to-map.md) records that the trigger for 'map' has FIRED -- §6.1 consumes link/links.parquet -- and specifies the wiring; until that wiring lands this refusal stays, so that no run can report success having measured a scope it did not run.")
     }
 
     //
@@ -900,6 +949,7 @@ workflow CLINICALHARMONIZE {
     // null) -- a harness run in progress does not change this stage at all.
     //
     def ch_confirmed = channel.empty()
+    def ch_ruleset = channel.empty()
 
     if (graph.indexOf(graphStage) >= graph.indexOf('confirm')) {
         // The baseline's own ledger.proposed.yaml -- ch_ledgers already
@@ -982,7 +1032,60 @@ workflow CLINICALHARMONIZE {
                     [rule.from.cohort_id, rule.from.dataset_id, rule.from.column, rule.to.variable, rule.to.concept_id, rule.rule_id]
                 }
             }
+
+            // §6.1's IN slot names rules/ruleset.json itself, not the
+            // re-shaped ch_confirmed above: the mapper needs `kind` and the
+            // full from/to objects, and re-shaping them back out of a tuple
+            // would put a second reading of the ruleset's structure in the
+            // repo. The FILE is what travels.
+            ch_ruleset = COMPILE_RULES.out.ruleset
         }
+    }
+
+    /*
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        §6.1 — apply concept mappings into OMOP rows.
+
+        The first stage that consumes §3's output. §0.9's dependency
+        direction is that §2 feeds §4 while §3 feeds §6, and this is that
+        second edge: links.parquet supplies person_id, and nothing else in
+        the pipeline does.
+
+        That edge is what the phase-1 handoff flagged as the §10.1 trigger,
+        and it is why --invariant_scope is widened in this same change
+        rather than after it (see the isInvariantRun gate above and
+        docs/adr/0004-invariant-scope-map.md). The harness's claim now
+        reaches the mapped tables, so a joint statistic computed in §3 and
+        carried into §6 is inside the measurement rather than beside it.
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    */
+    def ch_mapped = channel.empty()
+    def ch_unmapped = channel.empty()
+
+    if (graph.indexOf(graphStage) >= graph.indexOf('map')) {
+        // The admitted tables as one JSON document, identical in shape and
+        // reasoning to the link block's own ch_link_tables_json above: a
+        // whole-run task, downstream of the §1.2 seal, so a held-out
+        // dataset is never named here and therefore never mapped.
+        def ch_map_tables_json = ch_open
+            .map { meta, table -> [cohort_id: meta.cohort_id, dataset_id: meta.dataset_id, path: table.toString()] }
+            .toList()
+            .map { rows -> groovy.json.JsonOutput.toJson(rows.sort { a, b -> (a.cohort_id + a.dataset_id) <=> (b.cohort_id + b.dataset_id) }) }
+
+        def (packVariablesForMap, vocabularyReleaseForMap) = loadPackForPropose(concept_pack)
+        def mapParamsJson = buildMapParamsJson(cdm_version, cdm_domains, max_unmapped_frac, keep_source_concept)
+
+        MAP_CONCEPTS(
+            ch_map_tables_json,
+            ch_ruleset,
+            ch_links,
+            groovy.json.JsonOutput.toJson(packVariablesForMap),
+            vocabularyReleaseForMap,
+            mapParamsJson,
+        )
+        ch_versions = ch_versions.mix(MAP_CONCEPTS.out.versions)
+        ch_mapped = MAP_CONCEPTS.out.mapped
+        ch_unmapped = MAP_CONCEPTS.out.unmapped
     }
 
     //

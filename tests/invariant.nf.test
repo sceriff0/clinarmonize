@@ -210,8 +210,16 @@ nextflow_pipeline {
         // --stop_after propose (== invariant_scope) must be allowed through.
         // It is bound to that stage and nothing else: a seeded run aimed
         // past it stays refused, so `--permute_outcome_seed 1..100
-        // --stop_after map` cannot report [SUCCESS] with 'map' never having
-        // run once the proposer lands.
+        // --stop_after map` cannot report [SUCCESS] with the mapper never
+        // having been measured.
+        //
+        // Until §6.1 this test passed for an INCIDENTAL reason -- 'map' was
+        // unimplemented, so the stage gate refused it on the way past, and
+        // the property this test is named for was never actually exercised.
+        // Building §6.1 made 'map' implemented and the run sailed through,
+        // which is how the gap was found. workflows/harmonize.nf now refuses
+        // scope-overrun explicitly, so the assertion below is about the real
+        // mechanism and no longer moves when a stage lands.
 
         when {
             params {
@@ -226,7 +234,17 @@ nextflow_pipeline {
         then {
             assert !workflow.success
             def stderr = (workflow.stdout + workflow.stderr).join('\n')
-            assert stderr.contains('not implemented')
+
+            // Refused for the RIGHT reason: the scope, not the build state.
+            // 'map' is implemented as of §6.1, so a message about an
+            // unimplemented stage here would mean the check had silently
+            // reverted to the incidental one.
+            assert stderr.contains('runs PAST')
+            assert stderr.contains('invariant_scope')
+            assert !stderr.contains('not implemented')
+
+            // And refused BEFORE anything ran. A refusal that arrives after
+            // the mapper has already published mapped/ is not a refusal.
             assert workflow.trace.tasks().size() == 0
         }
     }

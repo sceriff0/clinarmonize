@@ -172,7 +172,7 @@
                     "default": "propose",
                     "enum": ["propose", "map", "all"],
                     "description": "Stage the invariant harness holds the outcome-blindness claim over.",
-                    "help_text": "widening it is a design change, not a config tweak (\u00a710.1, ADR-003). \u00a78.3's standardized-difference forest legitimately reads outcome variables for REPORTING, so an end-to-end scope would fail honestly and then get relaxed. Only 'propose' is implemented.",
+                    "help_text": "widening it is a design change, not a config tweak (\u00a710.1, ADR-003, docs/adr/). ADR-004 records that the 'map' trigger has fired (\u00a76.1 consumes link/links.parquet) and specifies the wiring; it is not yet wired, so 'map' is still refused at run time. \u00a78.3's standardized-difference forest legitimately reads outcome variables for REPORTING, so an end-to-end scope would fail honestly and then get relaxed. Only 'propose' is implemented.",
                     "fa_icon": "fas fa-crosshairs"
                 },
                 "blocking_rules": {
@@ -372,6 +372,41 @@
                     "description": "Two rules writing the same target cell is a defect, not a merge.",
                     "help_text": "Two rules writing the same target cell is a defect, not a merge (§5.2). False logs the collision loudly and keeps both rules, unmerged -- it never causes a silent merge either way.",
                     "fa_icon": "fas fa-code-branch"
+                },
+                "cdm_version": {
+                    "type": "string",
+                    "default": "5.4",
+                    "enum": ["5.3", "5.4"],
+                    "description": "Target OMOP CDM release.",
+                    "help_text": "The target table shapes (§6.1). Validated and recorded; across the five-table subset this stage emits, the generic (concept, source_value, source_concept, datetime, value) shape is identical in 5.3 and 5.4, so nothing branches on it today -- bin/map_concepts.py says so rather than faking a shape difference.",
+                    "fa_icon": "fas fa-table"
+                },
+                "cdm_domains": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": ["person", "condition_occurrence", "drug_exposure", "measurement", "observation", "procedure_occurrence", "device_exposure"]
+                    },
+                    "default": ["person", "condition_occurrence", "drug_exposure", "measurement", "observation"],
+                    "description": "The CDM tables this pipeline emits.",
+                    "help_text": "The five-table subset; the pipeline never claims full conformance (§6.1). A rule whose target variable's domain maps outside this list is reported as not applied, never silently dropped.",
+                    "fa_icon": "fas fa-th-list"
+                },
+                "max_unmapped_frac": {
+                    "type": "number",
+                    "default": 0.2,
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "description": "Fraction of source values allowed to reach _unmapped.parquet.",
+                    "help_text": "Above this fraction of values unmapped, the run fails (§6.1). Counted over non-null source values in every admitted column: a null cell is not a source value with no standard concept, so counting it would make the gate fire on sparsity rather than on coverage.",
+                    "fa_icon": "fas fa-percent"
+                },
+                "keep_source_concept": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Retain the pre-translation source concept id.",
+                    "help_text": "Retains the pre-translation concept; turning it off breaks --audit (§6.1). The column is removed entirely rather than nulled, so a run without it cannot be mistaken for one whose lookups all failed.",
+                    "fa_icon": "fas fa-undo"
                 },
                 "generality_terms": {
                     "type": "string",

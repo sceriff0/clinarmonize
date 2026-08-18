@@ -92,6 +92,10 @@ workflow CLINARMONIZE_CLINICALHARMONIZE {
         params.allow_stale_ledger,
         params.rule_id_prefix,
         params.fail_on_rule_collision,
+        params.cdm_version,
+        params.cdm_domains,
+        params.max_unmapped_frac,
+        params.keep_source_concept,
         params.outdir,
     )
     emit:

@@ -43,8 +43,13 @@ and a list of one are three different encodings of things that look alike in
 a printout. All three are fixtures below.
 
 §2's profiler is still per-column, so no nested type comes from there yet.
-Widen again when it does, and when a stage first writes DECIMAL or
-TIMESTAMP.
+§6.1 (bin/map_concepts.py) then wrote the first TIMESTAMP -- mapped/<table>.parquet's
+<domain>_datetime -- so the mapped_measurement fixture below covers it: a real
+datetime, a NULL one (in fact today's common case), microsecond precision, and
+a pre-epoch value.
+
+Widen again when a stage first writes DECIMAL, or a nested type this file does
+not already carry.
 
 Usage
 -----
@@ -116,6 +121,35 @@ NESTED_FIXTURES = [
             # that failed to score yields the second.
             "('c1', 'a#3', 'b#4', 0.0, [])",
             "('c1', 'a#4', 'b#5', NULL, NULL)",
+        ],
+    ),
+    (
+        "mapped_measurement",
+        """person_id VARCHAR, cohort_id VARCHAR, measurement_concept_id BIGINT,
+           measurement_source_value VARCHAR, measurement_source_concept_id BIGINT,
+           measurement_datetime TIMESTAMP, value_as_number DOUBLE,
+           rule_id VARCHAR, rule_version VARCHAR""",
+        [
+            # §6.1's ordinary row, with a real datetime. TIMESTAMP is the
+            # type this file's own header said to widen for when a stage
+            # first wrote one, and bin/map_concepts.py is that stage.
+            "('P-aaa', 'c1', 200, '61', 0, TIMESTAMP '2026-08-18 13:45:07', 61.0, 'R-abc', '0.1.0')",
+            # A NULL timestamp -- in fact the COMMON case today, since no
+            # source column in either fixture carries one. A null timestamp
+            # and the epoch are one keystroke apart in a printout and are
+            # different encodings.
+            "('P-bbb', 'c1', 200, '50', 0, NULL, 50.0, 'R-abc', '0.1.0')",
+            # Sub-second precision, which duckdb stores as microseconds: the
+            # place a TIMESTAMP round-trip is most likely to lose something
+            # quietly rather than loudly.
+            "('P-ccc', 'c1', 200, '52.5', 0, TIMESTAMP '2026-08-18 13:45:07.123456', 52.5, 'R-abc', '0.1.0')",
+            # Pre-epoch, so a signed/unsigned or offset error cannot hide
+            # behind an all-positive fixture.
+            "('P-ddd', 'c1', 200, '48', 0, TIMESTAMP '1901-12-13 20:45:52', 48.0, 'R-abc', '0.1.0')",
+            # An unparseable source value: verbatim string kept, value_as_number
+            # null. Distinguishing that from 0.0 is the same lesson
+            # effective_weight taught in §4.2.
+            "('P-eee', 'c1', 200, 'ünïcode', 0, NULL, NULL, 'R-abc', '0.1.0')",
         ],
     ),
     (

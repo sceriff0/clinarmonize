@@ -90,14 +90,15 @@ nextflow_pipeline {
         // red for the right reason, which is the only way anyone finds out
         // that a gate test has quietly stopped gating.
         //
-        // 'map' is §6, build-order item 8, and the first unimplemented stage
-        // today. Move this to the next one when §6 lands; a gate test naming
-        // an implemented stage asserts nothing at all.
+        // ... and 'map' until §6.1 was built, which moved it here again.
+        // 'derive' is §7, build-order item 9, and the first unimplemented
+        // stage today. Move this to the next one when §7 lands; a gate test
+        // naming an implemented stage asserts nothing at all.
 
         when {
             params {
                 outdir     = "$outputDir"
-                stop_after = "map"
+                stop_after = "derive"
             }
         }
 
@@ -108,6 +109,7 @@ nextflow_pipeline {
             // The message has to name what IS implemented, so the reader's
             // next move is obvious rather than a guess.
             assert stderr.contains('link')
+            assert stderr.contains('map')
         }
     }
 
