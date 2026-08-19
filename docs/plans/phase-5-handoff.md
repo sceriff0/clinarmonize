@@ -18,10 +18,18 @@ harmonization decision, so it comes from the gate or it does not get made.
 
 ## State
 
-* Branch `main`. Phase 4's commits are pushed to
-  `github.com/sceriff0/clinarmonize`; **this phase's are not pushed** and no
-  PR has been opened. Opening one is still what first fires `linting.yml` and
-  `nf-test.yml`, including the known-red nf-core/tools crash below.
+* Branch `main`, **pushed** to `github.com/sceriff0/clinarmonize` (public).
+  §6.3 itself is `db61367`; five later commits are cluster tooling and are
+  described under "Cluster tooling, and the bug it uncovered" below. **No PR
+  has ever been opened**, and opening one is still what first fires
+  `linting.yml` and `nf-test.yml`, including the known-red nf-core/tools crash
+  below. Pushing to `main` fires only `build-container.yml`, and only on
+  `containers/**` paths.
+* **The pipeline runs green on the cluster under Apptainer** — 14/14 tasks
+  through `map` on the §6.3 fixture, 2026-08-19, publishing all five
+  `qc/` artefacts including both alluvial plots. That proves §6.3 works inside
+  the image; it is **not** Global Constraint 6, which is the test SUITE under
+  the container.
 * **Suite: 69/69 green** under `-profile test` on the host
   (61 at the end of phase 4). The eight new tests are all in
   `tests/value_map.nf.test`.
@@ -384,6 +392,66 @@ live, not by reading:
 `unmapped_value_policy` is an `enum`, not an `array`, so it does **not** widen
 the nf-core/tools 4.1.0 blast radius below. `emit_alluvial` is a boolean and
 `max_fan_in_warn` an integer; neither does either.
+
+## Cluster tooling, and the bug it uncovered
+
+Five commits after `db61367`, none of which touch the pipeline: `e0e33fe`,
+`57192c0`, `0db1c51`, `f1e8152`, `637a61b`.
+
+`tools/run_pipeline.sh` runs the pipeline with the checkout on one filesystem
+and the run on another. `tools/sbatch_run_pipeline.sh` wraps it for SLURM.
+Neither has a site path in it; both read `RUN_DIR`, `SRC_DIR`,
+`CLINARMONIZE_CACHE` and `CLINARMONIZE_BIND` from the caller. The README gained
+a "Running on an HPC cluster" section.
+
+`tools/verify_clinarmonize.sh` had **two absolute paths from one machine baked
+in** — a container cache under a named scratch project and an nf-test workdir
+under a named user — in a public repo. Neither was load-bearing. Both now
+resolve `$CLINARMONIZE_CACHE` → `$SCRATCH` → `$HOME`.
+
+Four things only came out of running it on a real cluster, and each is the kind
+that is silent from the submitting shell:
+
+* **`RUN_DIR=... sbatch script.sh` does not reach the job** unless the site
+  runs `--export=ALL`. `RUN_DIR` is now an argument (`--run-dir=PATH`), because
+  a command line is the one thing SLURM always preserves.
+* **SLURM executes a spooled copy of a batch script**, so `${BASH_SOURCE[0]}`
+  cannot locate the repo. `$SLURM_SUBMIT_DIR` can.
+* **A bare CLI number is a string to nf-schema.** `--max_unmapped_frac 0.6`
+  is rejected as *"Value is [string] but should be [number]"*; the same value
+  in a `-params-file` validates. This is recorded twice in this document
+  because both a README example and a demo command got it wrong.
+* **`${VAR:-default}` substitutes on empty as well as unset**, so an explicit
+  `CONDA_ENV=` could not mean "already active". `${VAR-default}`, one dash, is
+  the only form that distinguishes them.
+
+### The bind bug — a real defect, confirmed on the cluster
+
+Under `-profile singularity`, any input outside an auto-mounted path fails:
+
+```
+IOException: No files found that match the pattern "/beegfs/.../values_fixture.csv"
+```
+
+The file exists. `LINK_BLOCKING`, `LINK_SCORE`, `LINK_RESOLVE` and
+`MAP_CONCEPTS` take their source tables as `val(tables_json)` — a JSON string
+of absolute paths — so Nextflow never learns they are files and
+`singularity.autoMounts` has nothing to bind. It survived a full container
+verification because that run's fixtures lived under the checkout in `$HOME`,
+which auto-mounts.
+
+**`SINGULARITY_BIND`/`APPTAINER_BIND` do not fix it**, and this cost a
+round-trip: Nextflow invokes the engine with a cleaned environment
+(`env - PATH=... singularity exec ...`), so an exported bind list is wiped. The
+`SINGULARITYENV_*` forwarding visible in every task log exists *because* of
+that clearing — it was the clue in the first failure. The working mechanism is
+`singularity.runOptions`, which `tools/run_pipeline.sh` now generates into
+`$RUN_DIR/.clinarmonize-binds.config` and passes with `-c`.
+
+That is a workaround in the launcher, **not a fix in the pipeline**. Anyone
+running `nextflow run` directly still hits it, and so will real cohort data on
+scratch. The fix is to make those four inputs real staged `path` inputs, which
+is a §3/§6.1 contract change and wants its own task.
 
 ## What is not done — the remaining ladder
 
